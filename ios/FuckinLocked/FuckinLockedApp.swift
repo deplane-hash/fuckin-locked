@@ -459,6 +459,10 @@ private struct ConversationView: View {
                             try messaging.verifyPeer(for: id)
                             verified = true
                             status = "Device verified"
+                            Task {
+                                do { try await messaging.receive(in: id) }
+                                catch { status = "Device verified — messages will retry when connected" }
+                            }
                         } catch { status = "Verification failed" }
                     }.foregroundStyle(Palette.lime)
                 }
