@@ -46,6 +46,7 @@ enum VoiceCallError: Error {
     private let peerConnection: RTCPeerConnection
     private let audioSession = AVAudioSession.sharedInstance()
     private var audioTrack: RTCAudioTrack?
+    private var pendingCandidates: [RTCIceCandidate] = []
     private var stopped = false
 
     init(callID: UUID, isCaller: Bool, turn: CallTURN,
@@ -98,18 +99,19 @@ enum VoiceCallError: Error {
         try audioSession.setCategory(.playAndRecord, mode: .voiceChat,
                                      options: [.allowBluetooth, .allowBluetoothA2DP,
                                                .defaultToSpeaker])
+    }
+
+    private func activateMicrophone() async throws {
+        let granted = await withCheckedContinuation { continuation in
+            audioSession.requestRecordPermission { continuation.resume(returning: $0) }
+        }
+        guard granted else { throw VoiceCallError.microphoneDenied }
         try audioSession.setActive(true)
     }
 
     func startOutgoing() async throws {
         guard isCaller, !stopped else { throw VoiceCallError.unavailable }
-        let granted = await withCheckedContinuation { continuation in
-            audioSession.requestRecordPermission { continuation.resume(returning: $0) }
-        }
-        guard granted else {
-            stop(sendHangup: false)
-            throw VoiceCallError.microphoneDenied
-        }
+        try await activateMicrophone()
         let constraints = RTCMediaConstraints(
             mandatoryConstraints: [kRTCMediaConstraintsOfferToReceiveAudio:
                                    kRTCMediaConstraintsValueTrue],
@@ -143,6 +145,7 @@ enum VoiceCallError: Error {
     }
 
     private func acceptOffer(_ signal: CallSignal) async throws {
+        try await activateMicrophone()
         let description = try decodeDescription(signal)
         try await setRemote(description)
         let constraints = RTCMediaConstraints(
@@ -194,6 +197,10 @@ enum VoiceCallError: Error {
                 else { continuation.resume() }
             }
         }
+        for candidate in pendingCandidates {
+            peerConnection.add(candidate) { _ in }
+        }
+        pendingCandidates.removeAll(keepingCapacity: false)
     }
 
     private func send(description: RTCSessionDescription, kind: String) throws {
@@ -215,7 +222,11 @@ enum VoiceCallError: Error {
             throw VoiceCallError.protocolError
         }
         let value = RTCIceCandidate(sdp: candidate, sdpMLineIndex: line, sdpMid: payload.sdpMid)
-        peerConnection.add(value) { _ in }
+        if peerConnection.remoteDescription == nil {
+            pendingCandidates.append(value)
+        } else {
+            peerConnection.add(value) { _ in }
+        }
     }
 
     func stop(sendHangup: Bool = true) {

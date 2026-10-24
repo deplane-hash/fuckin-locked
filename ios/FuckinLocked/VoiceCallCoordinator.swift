@@ -76,12 +76,15 @@ import UIKit
         for record in records where !record.isOutgoing {
             guard let signal = record.callSignal, !consumedMessages.contains(record.id) else { continue }
             consumedMessages.insert(record.id)
-            Task { @MainActor in await self.handleIncoming(signal) }
+            Task { @MainActor in await self.handleIncoming(signal, receivedAt: record.sentAt) }
         }
     }
 
-    private func handleIncoming(_ signal: CallSignal) async {
-        guard signal.kind == "offer" || engine != nil else {
+    private func handleIncoming(_ signal: CallSignal, receivedAt: Date) async {
+        // Do not turn a stale persisted offer into an unexpected call after a
+        // restart. Answers/ICE/hangups are accepted only for an active call.
+        let freshOffer = signal.kind == "offer" && Date().timeIntervalSince(receivedAt) <= 300
+        guard freshOffer || engine != nil else {
             if signal.kind == "hangup" { stop(sendHangup: false) }
             return
         }
@@ -138,6 +141,7 @@ import UIKit
         stateTask?.cancel()
         stateTask = nil
         state = .idle
+        if sendHangup { status = "" }
     }
 }
 

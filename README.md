@@ -2,7 +2,7 @@
 
 Native SwiftUI iPhone messenger and an opaque-ciphertext Python relay. This is an implementation under test, not a production-ready or independently reviewed messenger. Read [the verification report](docs/verification.md) before relying on a feature.
 
-The current one-to-one path implements libsignal text, reactions, bounded still-image messages, and original starter stickers. App and chat passwords protect the underlying local keys. Local draft chats are explicitly labeled and never presented as delivered conversations. Group messaging, calls, push, GIF integrations, animation, and general file attachments remain unfinished.
+The current one-to-one path implements libsignal text, reactions, bounded still-image messages, original starter stickers, and an encrypted audio-call path. App and chat passwords protect the underlying local keys. Local draft chats are explicitly labeled and never presented as delivered conversations. Calls use WebRTC DTLS-SRTP with relay-only TURN-over-TLS media; offer/answer/ICE signaling remains inside the existing libsignal message channel. Calls are intentionally not exposed as a navigation destination until two-device media verification is complete.
 
 ## Project layout
 
@@ -93,4 +93,4 @@ Physical iPhones are still required to verify ordinary screenshot timing, screen
 
 Apple SwiftUI/UIKit/PhotosUI/ImageIO/CryptoKit/CommonCrypto/Security supply platform functionality. Python `cryptography==50.0.2` is Apache-2.0 OR BSD-3-Clause. `LibSignalClient` is pinned to v0.105.0 and a prebuilt FFI checksum using the documented CocoaPods integration. Its upstream license is AGPL-3.0-only, third-party support is explicitly unsupported, and APIs can change. Keep matching source/dependency notices available to recipients and review distribution obligations before release. [Protocol notes and primary sources](docs/protocol-integration.md) explain the maintenance/deployment assumptions.
 
-Remaining work includes group membership/key management, encrypted calls through the required route, generic push/background-delivery design, animated/general attachments, pack import, QR pairing, broader accessibility/preferences, signed-device checks and independent security review. Those features are not represented as working tabs or encrypted connections.
+Remaining work includes two-device call verification on physical iPhones, generic push/background-delivery design, animated/general attachments, pack import, QR pairing, broader accessibility/preferences, signed-device checks and independent security review. Calls are not represented as a navigation tab; the relay only enables them when its authenticated TURN-over-TLS configuration is present. This is not production-ready until the call path and the complete security design receive independent review.

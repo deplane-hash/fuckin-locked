@@ -19,9 +19,10 @@ struct MessageContent: Codable {
     func validate() throws {
         guard version == 1, text.utf8.count <= 16_384 else { throw MessagingError.invalidMessage }
         if let callSignal {
-            guard text.isEmpty, image == nil, reactionTarget == nil, reaction == nil,
-                  CallSignal.kinds.contains(callSignal.kind),
-                  callSignal.body.count <= CallSignal.maxBytes else { throw MessagingError.invalidMessage }
+            guard text.isEmpty, image == nil, reactionTarget == nil, reaction == nil else {
+                throw MessagingError.invalidMessage
+            }
+            try callSignal.validate()
             return
         }
         if let groupID {

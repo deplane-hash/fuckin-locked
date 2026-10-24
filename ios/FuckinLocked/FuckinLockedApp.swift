@@ -523,10 +523,14 @@ private struct ConversationView: View {
                 if let chat = try? vault.chatMetadata(for: id), !chat.isGroup,
                    let callController {
                     Button {
-                        Task { await callController.startOutgoing() }
-                    } label: { Image(systemName: "phone") }
-                    .disabled(callController.isActive || !verified)
-                    .accessibilityLabel("Start encrypted voice call")
+                        if callController.isActive {
+                            callController.stop()
+                        } else {
+                            Task { await callController.startOutgoing() }
+                        }
+                    } label: { Image(systemName: callController.isActive ? "phone.down.fill" : "phone") }
+                    .disabled(!callController.isActive && !verified)
+                    .accessibilityLabel(callController.isActive ? "End encrypted voice call" : "Start encrypted voice call")
                 }
                 Button { showChangePassword = true } label: { Image(systemName: "key") }
                     .accessibilityLabel("Change chat password")
