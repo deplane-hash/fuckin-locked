@@ -500,6 +500,7 @@ private struct ChatGateView: View {
 private struct ConversationView: View {
     @EnvironmentObject var vault: LocalVault
     @EnvironmentObject var messaging: MessagingService
+    @EnvironmentObject var gateway: Gateway
     let id: UUID
     let title: String
     @State private var draft = ""
@@ -512,15 +513,24 @@ private struct ConversationView: View {
     @State private var verified = false
     @State private var identityMismatch = false
     @State private var status = ""
+    @State private var callController: VoiceCallCoordinator?
 
     var body: some View {
         VStack(spacing: 12) {
             HStack {
                 Text(title).font(.headline)
                 Spacer()
+                if let chat = try? vault.chatMetadata(for: id), !chat.isGroup,
+                   let callController {
+                    Button {
+                        Task { await callController.startOutgoing() }
+                    } label: { Image(systemName: "phone") }
+                    .disabled(callController.isActive || !verified)
+                    .accessibilityLabel("Start encrypted voice call")
+                }
                 Button { showChangePassword = true } label: { Image(systemName: "key") }
                     .accessibilityLabel("Change chat password")
-                Button("Lock chat") { draft = ""; vault.lockChat() }
+                Button("Lock chat") { callController?.stop(); draft = ""; vault.lockChat() }
                     .foregroundStyle(Palette.lime)
             }.padding(.horizontal)
             if let chat = try? vault.chatMetadata(for: id), chat.roomID == nil {
@@ -559,7 +569,7 @@ private struct ConversationView: View {
             }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(vault.messageRecords.filter { $0.reactionTarget == nil }) { message in
+                    ForEach(vault.messageRecords.filter { $0.reactionTarget == nil && $0.callSignal == nil }) { message in
                         HStack {
                             if message.isOutgoing { Spacer(minLength: 36) }
                             VStack(alignment: message.isOutgoing ? .trailing : .leading, spacing: 3) {
@@ -606,6 +616,9 @@ private struct ConversationView: View {
                 }.padding(.horizontal)
             }
             if !status.isEmpty { Text(status).font(.caption).foregroundStyle(Palette.muted) }
+            if let callController, !callController.status.isEmpty {
+                Text(callController.status).font(.caption).foregroundStyle(Palette.muted)
+            }
             HStack(spacing: 12) {
                 Button { drawer.toggle() } label: { Image(systemName: "face.smiling") }
                     .accessibilityLabel("Stickers and emoji")
@@ -686,6 +699,10 @@ private struct ConversationView: View {
                 status = "Local draft — delivery is not configured"
                 return
             }
+            if callController == nil, let chat = try? vault.chatMetadata(for: id), !chat.isGroup {
+                callController = VoiceCallCoordinator(id: id, vault: vault,
+                                                       gateway: gateway, messaging: messaging)
+            }
             verified = (try? messaging.isPeerVerified(for: id)) ?? false
             while !Task.isCancelled && vault.chatGeneration == generation && vault.unlockedChatID == id {
                 do {
@@ -696,6 +713,7 @@ private struct ConversationView: View {
                         } else {
                             try await messaging.receive(in: id)
                         }
+                        callController?.consume(vault.messageRecords)
                         guard vault.chatGeneration == generation else { return }
                         ownFingerprint = (try? messaging.ownFingerprint(for: id)) ?? ""
                         status = ""
@@ -723,7 +741,8 @@ private struct ConversationView: View {
         }
         .onDisappear {
             draft = ""; fingerprint = ""; ownFingerprint = ""; drawer = false
-            selectedPhoto = nil; viewedImage = nil; vault.lockChat()
+            selectedPhoto = nil; viewedImage = nil; callController?.stop(sendHangup: false)
+            callController = nil; vault.lockChat()
         }
     }
 }

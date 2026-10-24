@@ -159,6 +159,13 @@ enum MessagingError: Error {
         try await sendContent(MessageContent(id: UUID(), text: "", image: image), in: id)
     }
 
+    func sendCallSignal(_ signal: CallSignal, in id: UUID) async throws {
+        try signal.validate()
+        try await sendContent(MessageContent(id: UUID(), text: "", image: nil,
+                                              reactionTarget: nil, reaction: nil,
+                                              callSignal: signal), in: id)
+    }
+
     func sendGroupContent(_ content: MessageContent, in id: UUID) async throws {
         guard content.groupID != nil else { throw MessagingError.invalidMessage }
         // Group fan-out reuses this tested per-device Signal transport. A retry
@@ -218,7 +225,7 @@ enum MessagingError: Error {
                                     delivery: .sending, envelopeID: nil, ciphertext: wire,
                                     image: content.image, reactionTarget: content.reactionTarget,
                                     reaction: content.reaction, groupID: content.groupID,
-                                    senderDeviceID: vault.deviceID)
+                                    senderDeviceID: vault.deviceID, callSignal: content.callSignal)
         state = store.state
         try vault.commitChat(state: state, message: message, for: id)
         // Persist the exact wire bytes together with the advanced ratchet before
@@ -311,7 +318,7 @@ enum MessagingError: Error {
                                         envelopeID: envelope.id, ciphertext: nil,
                                         image: content.image, reactionTarget: content.reactionTarget,
                                         reaction: content.reaction, groupID: content.groupID,
-                                        senderDeviceID: envelope.sender_device)
+                                        senderDeviceID: envelope.sender_device, callSignal: content.callSignal)
             state = store.state
             try vault.commitReceived(state: state, message: message,
                                      envelopeID: envelope.id, for: id)

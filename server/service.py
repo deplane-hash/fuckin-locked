@@ -643,7 +643,16 @@ class Handler(BaseHTTPRequestHandler):
                 return {"token": verify_login(db, data["device_id"], data["challenge"], data["signature"])}
             actor = active_session(db, self.headers.get("Authorization", "").removeprefix("Bearer "))
             if self.command == "GET" and path == "/v1/capabilities":
-                return {"capabilities": ["idempotent_envelopes_v1", "delivery_status_v1", "room_inbox_v1", "idempotent_prekeys_v1", "fixed_groups_v1"]}
+                capabilities = ["idempotent_envelopes_v1", "delivery_status_v1", "room_inbox_v1", "idempotent_prekeys_v1", "fixed_groups_v1"]
+                if os.environ.get("FL_TURN_URL") and os.environ.get("FL_TURN_USERNAME") and os.environ.get("FL_TURN_CREDENTIAL"):
+                    capabilities.append("encrypted_calls_v1")
+                return {"capabilities": capabilities}
+            if self.command == "GET" and path == "/v1/calls/turn":
+                url = os.environ.get("FL_TURN_URL", "")
+                username = os.environ.get("FL_TURN_USERNAME", "")
+                credential = os.environ.get("FL_TURN_CREDENTIAL", "")
+                require(url.startswith("turns:") and username and credential, 503, "Calls unavailable")
+                return {"url": url, "username": username, "credential": credential}
             if self.command == "POST" and path == "/v1/groups":
                 return {"room_id": create_group(db, actor, data["peer_devices"])}
             if self.command == "GET" and len(parts) == 3 and parts[:2] == ["v1", "groups"]:

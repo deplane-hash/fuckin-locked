@@ -35,6 +35,17 @@ import LibSignalClient
         XCTAssertNoThrow(try MessageContent(id: UUID(), text: "hello").validate())
         XCTAssertNoThrow(try MessageContent(id: UUID(), text: "", reactionTarget: UUID(), reaction: "💚").validate())
     }
+
+    func testVoiceCallSignalsAreBoundedAndCannotCarryChatContent() throws {
+        let signal = CallSignal(callID: UUID(), kind: "offer", body: Data(repeating: 7, count: 128))
+        XCTAssertNoThrow(try signal.validate())
+        XCTAssertNoThrow(try MessageContent(id: UUID(), text: "", callSignal: signal).validate())
+        XCTAssertThrowsError(try CallSignal(callID: UUID(), kind: "stun", body: Data()).validate())
+        XCTAssertThrowsError(try MessageContent(id: UUID(), text: "not empty", callSignal: signal).validate())
+        XCTAssertThrowsError(try MessageContent(id: UUID(), text: "", image: Data([1]), callSignal: signal).validate())
+        XCTAssertThrowsError(try CallSignal(callID: UUID(), kind: "ice",
+                                            body: Data(repeating: 0, count: CallSignal.maxBytes + 1)).validate())
+    }
     private func folder() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     }

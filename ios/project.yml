@@ -55,6 +55,7 @@ targets:
         "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]": SimulatorTests.entitlements
         INFOPLIST_KEY_CFBundleDisplayName: "Fuckin Locked"
         INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: NO
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Microphone access is required for encrypted voice calls."
   FuckinLockedTests:
     type: bundle.unit-test
     platform: iOS

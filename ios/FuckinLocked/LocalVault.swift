@@ -81,6 +81,7 @@ struct StoredMessage: Codable, Identifiable, Equatable {
     var reactions: [String: String]? = nil
     var groupID: String? = nil
     var senderDeviceID: String? = nil
+    var callSignal: CallSignal? = nil
 }
 
 struct ChatPayload: Codable {

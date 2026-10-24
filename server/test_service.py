@@ -7,6 +7,7 @@ import unittest
 import json
 import http.client
 import threading
+from unittest.mock import patch
 from http.server import ThreadingHTTPServer
 from concurrent.futures import ThreadPoolExecutor
 
@@ -119,6 +120,10 @@ class RelayTests(unittest.TestCase):
                          f"/v1/rooms/{room}/envelopes/pending"]:
                 self.assertEqual(request(path)[0], 200, path)
                 self.assertEqual(request(path, authenticated=False)[0], 401, path)
+            with patch.dict(os.environ, {"FL_TURN_URL": "", "FL_TURN_USERNAME": "", "FL_TURN_CREDENTIAL": ""}):
+                self.assertNotIn("encrypted_calls_v1", request("/v1/capabilities")[1]["capabilities"])
+                self.assertEqual(request("/v1/calls/turn")[0], 503)
+                self.assertEqual(request("/v1/calls/turn", authenticated=False)[0], 401)
             self.assertEqual(request(f"/v1/rooms/{room}/prekeys/{friend['device_id']}/request-one")[0], 200)
             status, result = request("/v1/envelopes", "POST", {
                 "room_id": room, "recipient_device": friend["device_id"], "kind": "message",

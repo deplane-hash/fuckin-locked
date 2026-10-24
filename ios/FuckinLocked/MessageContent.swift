@@ -12,11 +12,18 @@ struct MessageContent: Codable {
     var reactionTarget: UUID?
     var reaction: String?
     var groupID: String? = nil
+    var callSignal: CallSignal? = nil
 
     static let reactions = ["💚", "👍", "😂", "😮", "😢", "🔥"]
 
     func validate() throws {
         guard version == 1, text.utf8.count <= 16_384 else { throw MessagingError.invalidMessage }
+        if let callSignal {
+            guard text.isEmpty, image == nil, reactionTarget == nil, reaction == nil,
+                  CallSignal.kinds.contains(callSignal.kind),
+                  callSignal.body.count <= CallSignal.maxBytes else { throw MessagingError.invalidMessage }
+            return
+        }
         if let groupID {
             guard !groupID.isEmpty, groupID.utf8.count <= 128,
                   groupID.unicodeScalars.allSatisfy({ $0.value >= 0x21 && $0.value <= 0x7e })
@@ -29,6 +36,20 @@ struct MessageContent: Codable {
             guard reaction == nil, !text.isEmpty || image != nil else { throw MessagingError.invalidMessage }
         }
         if let image { try PrivateImage.validate(image) }
+    }
+}
+
+struct CallSignal: Codable, Equatable {
+    static let maxBytes = 64_000
+    static let kinds: Set<String> = ["offer", "answer", "ice", "hangup"]
+    let callID: UUID
+    let kind: String
+    let body: Data
+
+    func validate() throws {
+        guard Self.kinds.contains(kind), body.count <= Self.maxBytes else {
+            throw MessagingError.invalidMessage
+        }
     }
 }
 

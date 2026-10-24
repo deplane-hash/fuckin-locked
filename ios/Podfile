@@ -9,6 +9,10 @@ project 'FuckinLocked.xcodeproj'
 
 target 'FuckinLocked' do
   pod 'LibSignalClient', git: 'https://github.com/signalapp/libsignal.git', tag: 'v0.105.0'
+  # Pinned community distribution of official WebRTC M155 binaries. The
+  # legacy GoogleWebRTC pod is deprecated; keep this pin and license review
+  # together when upgrading.
+  pod 'WebRTC-lib', '155.0.0'
 
   target 'FuckinLockedTests' do
     inherit! :search_paths

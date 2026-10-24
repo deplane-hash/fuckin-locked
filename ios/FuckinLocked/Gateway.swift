@@ -49,6 +49,7 @@ struct DevicesResponse: Decodable { let devices: [DeviceInfo] }
 struct RoomCreated: Decodable { let room_id: String }
 struct RoomDevice: Decodable { let id: String; let user_id: String }
 struct RoomDevices: Decodable { let devices: [RoomDevice] }
+struct CallTURN: Decodable { let url: String; let username: String; let credential: String }
 struct RoomMember: Decodable, Identifiable {
     let id: String
     let name: String
@@ -221,6 +222,13 @@ struct RelayPrekeyBundle: Codable {
         }
     }
 
+    func requireCallCapabilities() async throws {
+        let result: [String: [String]] = try await request("/v1/capabilities")
+        guard result["capabilities"]?.contains("encrypted_calls_v1") == true else {
+            throw ConnectionError.unavailable
+        }
+    }
+
     func accountProfile() async throws -> AccountProfile {
         try await request("/v1/me")
     }
@@ -329,6 +337,17 @@ struct RelayPrekeyBundle: Codable {
     func removeGroupMember(_ id: String, userID: String) async throws {
         let _: [String: String] = try await request("/v1/groups/\(try routeID(id))/members/\(try routeID(userID))/remove",
                                                     method: "POST", body: [:])
+    }
+
+    func callTURN() async throws -> CallTURN {
+        let turn: CallTURN = try await request("/v1/calls/turn")
+        // Voice media must use the same operator-controlled route as service
+        // traffic. Reject a deployment that tries to hand the client an
+        // unrelated TURN host instead of silently creating a second route.
+        guard let expectedHost = base?.host,
+              let turnHost = URL(string: turn.url)?.host,
+              turnHost == expectedHost else { throw ConnectionError.unavailable }
+        return turn
     }
 
     func publishPrekeys(_ bundle: SignalPublicBundle, roomID: String) async throws {
