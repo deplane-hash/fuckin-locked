@@ -48,6 +48,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.example.fuckinlocked
+        "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]": SimulatorTests.entitlements
         INFOPLIST_KEY_CFBundleDisplayName: "Fuckin Locked"
         INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: NO
   FuckinLockedTests:

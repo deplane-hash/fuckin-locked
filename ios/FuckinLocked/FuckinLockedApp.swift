@@ -71,6 +71,9 @@ private struct PrivateRootView: View {
                 gateway.disconnect()
                 vault.lockApp()
             }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                forceCover = false
+            }
             .onChange(of: captured) { _, isCaptured in
                 if isCaptured { gateway.disconnect(); vault.lockApp() }
             }

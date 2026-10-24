@@ -15,6 +15,14 @@
 - Run `40131001883` found a new compose-view catch-variable compile error; that
   error is fixed in the working source. The newest rerun must be checked before
   calling this source a buildable or verified beta.
+- Run `40131445830` compiled and ran **19 simulator tests: 18 passed, 1 failed,
+  0 skipped**. The passing cases include the real UI background/relaunch test,
+  vault/password-failure/atomic-write tests, and the libsignal store round trip.
+  The HTTPS fixture health request succeeds; integration stops at the first
+  device's Keychain identity creation before a bootstrap POST reaches the server.
+  The next revision uses ad-hoc simulator signing with explicit simulator-only
+  Keychain entitlements and reports safe OSStatus codes. Device builds do not use
+  the simulator entitlement file. This correction still requires a successful run.
 - Added source/tests: persisted encrypted outbox; distinct Sent/Delivered states;
   images/reactions; original stickers and encrypted preferences; explicit device
   linking; synchronous native inactive cover; scene-local capture observation;

@@ -35,6 +35,15 @@ private final class LoopbackTrustDelegate: NSObject, URLSessionDelegate, URLSess
     }
 }
 
+private final class OfflineTransport: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+    }
+    override func stopLoading() {}
+}
+
 @MainActor final class RelayIntegrationTests: XCTestCase {
     func testTwoIsolatedClientsExchangeMessagesThroughRelay() async throws {
         guard ProcessInfo.processInfo.environment["FL_RUN_RELAY_INTEGRATION"] == "1" else {
@@ -168,7 +177,57 @@ private final class LoopbackTrustDelegate: NSObject, URLSessionDelegate, URLSess
         let saved = try Data(contentsOf: root.appendingPathComponent("bob/vault.bin"))
         XCTAssertNil(saved.range(of: jpeg))
         XCTAssertFalse(String(decoding: saved, as: UTF8.self).contains("hello from alice"))
+        stage = "offline outbox recovery"
+        let offlineConfiguration = URLSessionConfiguration.ephemeral
+        offlineConfiguration.protocolClasses = [OfflineTransport.self]
+        let offlineGateway = Gateway(baseURL: baseURL,
+            session: URLSession(configuration: offlineConfiguration),
+            identityAccount: "relay-integration-alice-\(suffix)")
+        let offlineMessaging = MessagingService(vault: aliceVault, gateway: offlineGateway)
+        do {
+            try await offlineMessaging.send("queued while offline", in: aliceChatID)
+            XCTFail("Offline send should remain queued")
+        } catch MessagingError.queued {}
+        XCTAssertEqual(aliceVault.messageRecords.last?.delivery, .sending)
+        aliceVault.lockApp()
+        try aliceVault.unlock("alice app password")
+        try aliceVault.unlockChat(aliceChatID, password: "alice chat password")
+        try await aliceMessaging.receive(in: aliceChatID)
+        try bobVault.unlock("bob app password")
+        try bobVault.unlockChat(bobChatID, password: "bob chat password")
+        try await bobMessaging.receive(in: bobChatID)
+        try await aliceMessaging.receive(in: aliceChatID)
+        XCTAssertEqual(bobVault.messageRecords.filter { $0.body == "queued while offline" }.count, 1)
+
+        stage = "additional device approval and revocation"
+        let linkedGateway = Gateway(baseURL: baseURL, session: session,
+            identityAccount: "relay-integration-linked-bob-\(suffix)")
+        let pendingDevice = try await bobGateway.requestDevice(publicKey: linkedGateway.pairingPublicKey())
+        do {
+            try await linkedGateway.login(deviceID: pendingDevice)
+            XCTFail("Pending device must not authenticate")
+        } catch ConnectionError.unavailable {}
+        try await bobGateway.approveDevice(pendingDevice)
+        try await linkedGateway.login(deviceID: pendingDevice)
+        let linkedProfile = try await linkedGateway.accountProfile()
+        XCTAssertEqual(linkedProfile.user_id, admission.user_id)
+        let restoredHistory = try await linkedGateway.pendingEnvelopes(roomID: roomID)
+        XCTAssertTrue(restoredHistory.isEmpty)
+        try await linkedGateway.revoke(bobDeviceID)
+        do {
+            _ = try await bobGateway.people()
+            XCTFail("Revocation must invalidate an existing authenticated session")
+        } catch ConnectionError.unavailable {}
+        do {
+            try await aliceMessaging.send("after device revocation", in: aliceChatID)
+            XCTFail("A bound revoked recipient must not receive a new envelope")
+        } catch MessagingError.queued {}
+        let silentlyForwarded = try await linkedGateway.pendingEnvelopes(roomID: roomID)
+        XCTAssertTrue(silentlyForwarded.isEmpty)
         } catch {
+            if case DeviceIdentityError.keychain(let status) = error {
+                XCTFail("Keychain OSStatus at \(stage): \(status)")
+            }
             XCTFail("Relay integration failed at: \(stage). Error type: \(type(of: error))")
             throw error
         }

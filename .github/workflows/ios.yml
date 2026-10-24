@@ -6,16 +6,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  previous-result:
-    runs-on: macos-26
-    steps:
-      - name: Diagnose previous integration result
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh run download 40130411164 --repo "$GITHUB_REPOSITORY" \
-            --name fuckin-locked-simulator-results --dir "$RUNNER_TEMP/previous.xcresult"
-          xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/previous.xcresult"
   ios:
     runs-on: macos-26
     timeout-minutes: 60
@@ -62,8 +52,10 @@ jobs:
             -workspace FuckinLocked.xcworkspace \
             -scheme FuckinLockedRelayTests \
             -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' \
+            -derivedDataPath "$RUNNER_TEMP/fuckin-locked-simulator-build" \
             -resultBundlePath "$RUNNER_TEMP/FuckinLockedTests.xcresult" \
-            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGN_IDENTITY=- \
             -quiet
       - name: Upload simulator test results
         if: always()
@@ -78,6 +70,10 @@ jobs:
             xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/FuckinLockedTests.xcresult"
           fi
           cat "$RUNNER_TEMP/fuckin-locked-relay.log"
+          simulator_app="$RUNNER_TEMP/fuckin-locked-simulator-build/Build/Products/Debug-iphonesimulator/FuckinLocked.app"
+          if [ -d "$simulator_app" ]; then
+            codesign -d --entitlements :- "$simulator_app"
+          fi
       - name: Stop local HTTPS relay integration fixture
         if: always()
         run: |

@@ -372,11 +372,18 @@ struct RelayPrekeyBundle: Codable {
     }
 }
 
+enum DeviceIdentityError: Error {
+    case keychain(OSStatus)
+    case corrupt
+}
+
 enum DeviceIdentity {
     static let defaultAccount = "device-signing-key"
 
     static func getOrCreate(account: String = defaultAccount) throws -> Curve25519.Signing.PrivateKey {
-        if let existing = try? load(account: account) { return existing }
+        do { return try load(account: account) }
+        catch DeviceIdentityError.keychain(errSecItemNotFound) {}
+        // A locked/unavailable Keychain is not permission to replace an identity.
         let created = Curve25519.Signing.PrivateKey()
         try save(created, account: account)
         return created
@@ -390,7 +397,8 @@ enum DeviceIdentity {
         var attributes = query
         attributes[kSecValueData as String] = key.rawRepresentation
         attributes[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        guard SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess else { throw ConnectionError.unavailable }
+        let status = SecItemAdd(attributes as CFDictionary, nil)
+        guard status == errSecSuccess else { throw DeviceIdentityError.keychain(status) }
     }
 
     static func load(account: String = defaultAccount) throws -> Curve25519.Signing.PrivateKey {
@@ -400,8 +408,9 @@ enum DeviceIdentity {
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne]
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data else { throw ConnectionError.unavailable }
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess else { throw DeviceIdentityError.keychain(status) }
+        guard let data = item as? Data else { throw DeviceIdentityError.corrupt }
         return try Curve25519.Signing.PrivateKey(rawRepresentation: data)
     }
 }
