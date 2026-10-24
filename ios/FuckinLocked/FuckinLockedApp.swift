@@ -464,6 +464,7 @@ private struct ChatGateView: View {
     let id: UUID
     @State private var password = ""
     @State private var error = ""
+    @FocusState private var passwordFocused: Bool
     var title: String { vault.chats.first(where: { $0.id == id })?.title ?? "Chat" }
     var body: some View {
         Group {
@@ -475,6 +476,7 @@ private struct ChatGateView: View {
                 PasswordLayout(title: title, subtitle: "This chat has a separate password.", content:
                     VStack(spacing: 14) {
                         SecureField("Chat password", text: $password).flField()
+                            .focused($passwordFocused)
                         if !error.isEmpty { Text(error).foregroundStyle(.red) }
                         PrimaryButton(title: "Unlock chat") {
                             do { try vault.unlockChat(id, password: password); password = "" }
@@ -488,7 +490,10 @@ private struct ChatGateView: View {
         .toolbar { ToolbarItem(placement: .topBarTrailing) {
             Button("Lock chat") { vault.lockChat(); dismiss() }
         }}
-        .onDisappear { password = ""; vault.lockChat() }
+        .onAppear {
+            DispatchQueue.main.async { passwordFocused = true }
+        }
+        .onDisappear { password = ""; passwordFocused = false; vault.lockChat() }
     }
 }
 
