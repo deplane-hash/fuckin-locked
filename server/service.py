@@ -267,12 +267,14 @@ def send_envelope(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, reci
 
 
 def pending_envelopes(db: sqlite3.Connection, actor: sqlite3.Row) -> list[dict]:
-    rows = db.execute("""SELECT e.id,e.room_id,e.sender_device,e.kind,e.ciphertext,e.created_at
+    rows = db.execute("""SELECT e.id,e.room_id,e.sender_device,sd.user_id sender_user_id,
+        e.kind,e.ciphertext,e.created_at
         FROM envelopes e JOIN devices d ON d.id=e.recipient_device
+        JOIN devices sd ON sd.id=e.sender_device
         JOIN members m ON m.room_id=e.room_id AND m.user_id=d.user_id
         WHERE e.recipient_device=? AND d.state='active' AND e.delivered_at IS NULL
         ORDER BY e.created_at,e.id LIMIT 100""", (actor["device_id"],)).fetchall()
-    return [{**{key: row[key] for key in ("id", "room_id", "sender_device", "kind", "created_at")},
+    return [{**{key: row[key] for key in ("id", "room_id", "sender_device", "sender_user_id", "kind", "created_at")},
              "ciphertext": base64.b64encode(row["ciphertext"]).decode()} for row in rows]
 
 

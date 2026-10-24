@@ -10,11 +10,95 @@ struct StoredChat: Codable, Identifiable {
     var salt: Data
     var wrappedKey: Data
     var ciphertext: Data
+    var roomID: String?
+    var remoteUserID: String?
+    var remoteDeviceID: String?
+
+    init(id: UUID, title: String, isGroup: Bool, salt: Data, wrappedKey: Data,
+         ciphertext: Data, roomID: String? = nil, remoteUserID: String? = nil,
+         remoteDeviceID: String? = nil) {
+        self.id = id
+        self.title = title
+        self.isGroup = isGroup
+        self.salt = salt
+        self.wrappedKey = wrappedKey
+        self.ciphertext = ciphertext
+        self.roomID = roomID
+        self.remoteUserID = remoteUserID
+        self.remoteDeviceID = remoteDeviceID
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, isGroup, salt, wrappedKey, ciphertext
+        case roomID, remoteUserID, remoteDeviceID
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        title = try values.decode(String.self, forKey: .title)
+        isGroup = try values.decode(Bool.self, forKey: .isGroup)
+        salt = try values.decode(Data.self, forKey: .salt)
+        wrappedKey = try values.decode(Data.self, forKey: .wrappedKey)
+        ciphertext = try values.decode(Data.self, forKey: .ciphertext)
+        roomID = try values.decodeIfPresent(String.self, forKey: .roomID)
+        remoteUserID = try values.decodeIfPresent(String.self, forKey: .remoteUserID)
+        remoteDeviceID = try values.decodeIfPresent(String.self, forKey: .remoteDeviceID)
+    }
+}
+
+enum MessageDelivery: String, Codable {
+    case sending
+    case delivered
+    case received
+}
+
+struct StoredMessage: Codable, Identifiable, Equatable {
+    var id: UUID
+    var body: String
+    var sentAt: Date
+    var isOutgoing: Bool
+    var delivery: MessageDelivery
+    var envelopeID: String?
+    var ciphertext: Data?
 }
 
 struct ChatPayload: Codable {
-    var messages: [String] = []
+    var messages: [StoredMessage] = []
     var signal: SignalState? = nil
+    var processedEnvelopeIDs: Set<String> = []
+    var pendingPeerBundle: RelayPrekeyBundle? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case messages, signal, processedEnvelopeIDs, pendingPeerBundle
+    }
+
+    init(messages: [StoredMessage] = [], signal: SignalState? = nil,
+         processedEnvelopeIDs: Set<String> = [], pendingPeerBundle: RelayPrekeyBundle? = nil) {
+        self.messages = messages
+        self.signal = signal
+        self.processedEnvelopeIDs = processedEnvelopeIDs
+        self.pendingPeerBundle = pendingPeerBundle
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        if let current = try? values.decode([StoredMessage].self, forKey: .messages) {
+            messages = current
+        } else {
+            let legacy = try values.decodeIfPresent([String].self, forKey: .messages) ?? []
+            messages = legacy.map {
+                StoredMessage(id: UUID(), body: $0, sentAt: .distantPast,
+                              isOutgoing: false, delivery: .received,
+                              envelopeID: nil, ciphertext: nil)
+            }
+        }
+        signal = try values.decodeIfPresent(SignalState.self, forKey: .signal)
+        processedEnvelopeIDs = try values.decodeIfPresent(Set<String>.self,
+                                                          forKey: .processedEnvelopeIDs) ?? []
+        pendingPeerBundle = try values.decodeIfPresent(RelayPrekeyBundle.self,
+                                                       forKey: .pendingPeerBundle)
+    }
 }
 
 struct StoredIndex: Codable {
@@ -57,6 +141,7 @@ struct DelayLedger: Codable {
     @Published private(set) var deviceID = ""
     @Published private(set) var unlockedChatID: UUID?
     @Published private(set) var messages: [String] = []
+    @Published private(set) var messageRecords: [StoredMessage] = []
     private var appKey: SymmetricKey?
     private var chatKey: SymmetricKey?
     private var chatPayload: ChatPayload?
@@ -69,6 +154,8 @@ struct DelayLedger: Codable {
     private var folder: URL { storageFolder }
     private var vaultURL: URL { folder.appendingPathComponent("vault.bin") }
     private var delayURL: URL { folder.appendingPathComponent("delay.bin") }
+
+    var indexedUserID: String { index.userID }
 
     init(directory: URL? = nil) {
         storageFolder = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -260,6 +347,12 @@ struct DelayLedger: Codable {
     }
 
     func createChat(title: String, isGroup: Bool, password: String) throws {
+        try createChat(title: title, isGroup: isGroup, password: password,
+                       roomID: nil, remoteUserID: nil, remoteDeviceID: nil)
+    }
+
+    func createChat(title: String, isGroup: Bool, password: String, roomID: String?,
+                    remoteUserID: String?, remoteDeviceID: String?) throws {
         guard isUnlocked, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VaultError.corrupt }
         guard password.count >= 12 else { throw VaultError.passwordTooShort }
         let raw = try random(32)
@@ -267,7 +360,8 @@ struct DelayLedger: Codable {
         var candidate = index
         candidate.chats.append(StoredChat(id: UUID(), title: title, isGroup: isGroup, salt: salt,
             wrappedKey: try seal(raw, key: derive(password, salt: salt)),
-            ciphertext: try seal(encoder.encode(ChatPayload()), key: SymmetricKey(data: raw))))
+            ciphertext: try seal(encoder.encode(ChatPayload()), key: SymmetricKey(data: raw)),
+            roomID: roomID, remoteUserID: remoteUserID, remoteDeviceID: remoteDeviceID))
         try save(candidate)
     }
 
@@ -297,7 +391,10 @@ struct DelayLedger: Codable {
             if let current = try? decoder.decode(ChatPayload.self, from: plaintext) {
                 content = current
             } else {
-                content = ChatPayload(messages: try decoder.decode([String].self, from: plaintext))
+                content = ChatPayload(messages: try decoder.decode([String].self, from: plaintext).map {
+                    StoredMessage(id: UUID(), body: $0, sentAt: .distantPast, isOutgoing: false,
+                                  delivery: .received, envelopeID: nil, ciphertext: nil)
+                })
             }
         } catch {
             try failedChatAttempt(id)
@@ -306,8 +403,78 @@ struct DelayLedger: Codable {
         try resetChatDelay(id)
         chatKey = key
         chatPayload = content
-        messages = content.messages
+        messageRecords = content.messages
+        messages = content.messages.map(\.body)
         unlockedChatID = id
+    }
+
+    func chatMetadata(for id: UUID) throws -> StoredChat {
+        guard isUnlocked, let chat = index.chats.first(where: { $0.id == id }) else {
+            throw VaultError.corrupt
+        }
+        return chat
+    }
+
+    private func commitChatPayload(_ payload: ChatPayload, for id: UUID) throws {
+        guard isUnlocked, let chatKey,
+              let position = index.chats.firstIndex(where: { $0.id == id }) else {
+            throw VaultError.corrupt
+        }
+        var candidate = index
+        candidate.chats[position].ciphertext = try seal(encoder.encode(payload), key: chatKey)
+        try save(candidate)
+        chatPayload = payload
+        messageRecords = payload.messages
+        messages = payload.messages.map(\.body)
+    }
+
+    func commitChat(state: SignalState, message: StoredMessage?, for id: UUID) throws {
+        guard unlockedChatID == id, var payload = chatPayload else { throw VaultError.corrupt }
+        payload.signal = state
+        if let message { payload.messages.append(message) }
+        try commitChatPayload(payload, for: id)
+    }
+
+    func savePendingPeerBundle(_ bundle: RelayPrekeyBundle, for id: UUID) throws {
+        guard unlockedChatID == id, var payload = chatPayload else { throw VaultError.corrupt }
+        payload.pendingPeerBundle = bundle
+        try commitChatPayload(payload, for: id)
+    }
+
+    func pendingPeerBundle(for id: UUID) throws -> RelayPrekeyBundle? {
+        guard unlockedChatID == id, let payload = chatPayload else { throw VaultError.corrupt }
+        return payload.pendingPeerBundle
+    }
+
+    func clearPendingPeerBundle(for id: UUID) throws {
+        guard unlockedChatID == id, var payload = chatPayload else { throw VaultError.corrupt }
+        payload.pendingPeerBundle = nil
+        try commitChatPayload(payload, for: id)
+    }
+
+    func markMessageDelivered(_ messageID: UUID, envelopeID: String, for id: UUID) throws {
+        guard unlockedChatID == id, var payload = chatPayload,
+              let position = payload.messages.firstIndex(where: { $0.id == messageID }) else {
+            throw VaultError.corrupt
+        }
+        payload.messages[position].delivery = .delivered
+        payload.messages[position].envelopeID = envelopeID
+        try commitChatPayload(payload, for: id)
+    }
+
+    func hasProcessedEnvelope(_ envelopeID: String, for id: UUID) throws -> Bool {
+        guard unlockedChatID == id, let payload = chatPayload else { throw VaultError.corrupt }
+        return payload.processedEnvelopeIDs.contains(envelopeID)
+    }
+
+    func commitReceived(state: SignalState, message: StoredMessage, envelopeID: String,
+                        for id: UUID) throws {
+        guard unlockedChatID == id, var payload = chatPayload else { throw VaultError.corrupt }
+        guard !payload.processedEnvelopeIDs.contains(envelopeID) else { return }
+        payload.signal = state
+        payload.processedEnvelopeIDs.insert(envelopeID)
+        payload.messages.append(message)
+        try commitChatPayload(payload, for: id)
     }
 
     func signalState(for id: UUID) throws -> SignalState? {
@@ -320,10 +487,7 @@ struct DelayLedger: Codable {
               let position = index.chats.firstIndex(where: { $0.id == id }),
               var payload = chatPayload else { throw VaultError.corrupt }
         payload.signal = state
-        var candidate = index
-        candidate.chats[position].ciphertext = try seal(encoder.encode(payload), key: chatKey)
-        try save(candidate)
-        chatPayload = payload
+        try commitChatPayload(payload, for: id)
     }
 
     func changeChatPassword(_ id: UUID, old: String, new: String) throws {
@@ -350,6 +514,7 @@ struct DelayLedger: Codable {
 
     func lockChat() {
         messages.removeAll(keepingCapacity: false)
+        messageRecords.removeAll(keepingCapacity: false)
         chatPayload = nil
         chatKey = nil
         unlockedChatID = nil

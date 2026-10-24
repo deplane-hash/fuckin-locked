@@ -147,4 +147,19 @@ import LibSignalClient
         XCTAssertFalse(try store.isTrustedIdentity(changed, for: address, direction: .sending,
                                                     context: NullContext()))
     }
+
+    func testGeneratedPublicBundleIsSignedAndPrivateRecordsStayInStore() throws {
+        let store = VaultSignalStore(state: .new())
+        let bundle = try store.generatePublicBundle()
+        let identity = try IdentityKey(bytes: bundle.identityKey)
+        XCTAssertTrue(try identity.publicKey.verifySignature(message: bundle.signedPreKey,
+                                                              signature: bundle.signedPreKeySignature))
+        XCTAssertTrue(try identity.publicKey.verifySignature(message: bundle.kyberPreKey,
+                                                              signature: bundle.kyberPreKeySignature))
+        XCTAssertNotNil(store.state.preKeys[bundle.oneTimePreKeyID])
+        XCTAssertNotNil(store.state.signedPreKeys[bundle.signedPreKeyID])
+        XCTAssertNotNil(store.state.kyberPreKeys[bundle.kyberPreKeyID])
+        let publicDescription = String(describing: bundle.requestBody)
+        XCTAssertFalse(publicDescription.contains(store.state.identityKeyPair.base64EncodedString()))
+    }
 }

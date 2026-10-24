@@ -10,11 +10,20 @@ private enum Palette {
 }
 
 @main struct FuckinLockedApp: App {
-    @StateObject private var vault = LocalVault()
-    @StateObject private var gateway = Gateway()
+    @StateObject private var vault: LocalVault
+    @StateObject private var gateway: Gateway
+    @StateObject private var messaging: MessagingService
     @Environment(\.scenePhase) private var phase
     @Environment(\.isSceneCaptured) private var captured
     @State private var forceCover = false
+
+    init() {
+        let vault = LocalVault()
+        let gateway = Gateway()
+        _vault = StateObject(wrappedValue: vault)
+        _gateway = StateObject(wrappedValue: gateway)
+        _messaging = StateObject(wrappedValue: MessagingService(vault: vault, gateway: gateway))
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -32,6 +41,7 @@ private enum Palette {
             }
             .environmentObject(vault)
             .environmentObject(gateway)
+            .environmentObject(messaging)
             .preferredColorScheme(.dark)
             .onChange(of: phase) { _, newPhase in
                 if newPhase != .active { gateway.disconnect(); vault.lockApp() }
@@ -158,6 +168,7 @@ private enum Destination: String, CaseIterable {
 
 private struct MainView: View {
     @EnvironmentObject var vault: LocalVault
+    @EnvironmentObject var gateway: Gateway
     @State private var selected: Destination = .chats
     var body: some View {
         NavigationStack {
@@ -167,6 +178,10 @@ private struct MainView: View {
                 case .people: PeopleView()
                 case .you: YouView()
                 }
+            }
+            .task(id: vault.deviceID) {
+                guard !vault.deviceID.isEmpty else { return }
+                try? await gateway.login(deviceID: vault.deviceID)
             }
             .safeAreaInset(edge: .bottom) {
                 HStack(spacing: 4) {
@@ -258,27 +273,78 @@ private struct ChatsView: View {
 private struct ComposeView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var vault: LocalVault
+    @EnvironmentObject var gateway: Gateway
     @State private var title = ""
     @State private var password = ""
     @State private var group = false
     @State private var error = ""
+    @State private var people: [Person] = []
+    @State private var selectedPersonID = ""
+
+    private var availablePeople: [Person] {
+        people.filter { $0.id != vault.indexedUserID }
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 14) {
-                Text("Local draft chat").font(.headline)
-                Text("Message delivery is unavailable until encrypted sessions are integrated.")
+                Text(selectedPersonID.isEmpty ? "Local draft chat" : "Encrypted one-to-one")
+                    .font(.headline)
+                Text(selectedPersonID.isEmpty
+                     ? "A local draft is stored only on this device."
+                     : "Messages use an end-to-end encrypted session after device verification.")
                     .font(.footnote).foregroundStyle(Palette.muted)
+                if !availablePeople.isEmpty {
+                    Picker("Friend", selection: $selectedPersonID) {
+                        Text("Local draft").tag("")
+                        ForEach(availablePeople) { person in
+                            Text("\(person.name) · @\(person.username)").tag(person.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14).background(Palette.surface, in: RoundedRectangle(cornerRadius: 16))
+                }
                 TextField("Name", text: $title).flField()
-                Toggle("Group", isOn: $group).tint(Palette.lime)
+                if selectedPersonID.isEmpty {
+                    Toggle("Group", isOn: $group).tint(Palette.lime)
+                }
                 SecureField("Separate chat password", text: $password).flField()
                 if !error.isEmpty { Text(error).foregroundStyle(.red) }
-                PrimaryButton(title: "Create locked draft") {
-                    do { try vault.createChat(title: title, isGroup: group, password: password); dismiss() }
-                    catch { self.error = "Enter a name and a password of at least 12 characters" }
+                PrimaryButton(title: selectedPersonID.isEmpty ? "Create locked draft" : "Create encrypted chat") {
+                    Task {
+                        do {
+                            if selectedPersonID.isEmpty {
+                                try vault.createChat(title: title, isGroup: group, password: password)
+                            } else {
+                                try await gateway.login(deviceID: vault.deviceID)
+                                let room = try await gateway.createOneToOneRoom(with: selectedPersonID)
+                                let devices = try await gateway.roomDevices(room)
+                                guard let peer = devices.first(where: { $0.user_id == selectedPersonID }) else {
+                                    throw ConnectionError.invalidResponse
+                                }
+                                let person = availablePeople.first(where: { $0.id == selectedPersonID })
+                                try vault.createChat(title: person?.name ?? title, isGroup: false,
+                                                     password: password, roomID: room,
+                                                     remoteUserID: selectedPersonID,
+                                                     remoteDeviceID: peer.id)
+                            }
+                            dismiss()
+                        } catch {
+                            self.error = selectedPersonID.isEmpty
+                                ? "Enter a name and a password of at least 12 characters"
+                                : "Can't connect or create this chat"
+                        }
+                    }
                 }
                 Spacer()
             }.padding(22).background(Palette.background).foregroundStyle(Palette.text)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() } } }
+        }
+        .task {
+            guard !vault.deviceID.isEmpty else { return }
+            try? await gateway.login(deviceID: vault.deviceID)
+            people = (try? await gateway.people()) ?? []
         }
         .onDisappear { title = ""; password = "" }
     }
@@ -318,11 +384,16 @@ private struct ChatGateView: View {
 
 private struct ConversationView: View {
     @EnvironmentObject var vault: LocalVault
+    @EnvironmentObject var messaging: MessagingService
     let id: UUID
     let title: String
     @State private var draft = ""
     @State private var drawer = false
     @State private var showChangePassword = false
+    @State private var fingerprint = ""
+    @State private var verified = false
+    @State private var status = ""
+
     var body: some View {
         VStack(spacing: 12) {
             HStack {
@@ -333,15 +404,64 @@ private struct ConversationView: View {
                 Button("Lock chat") { draft = ""; vault.lockChat() }
                     .foregroundStyle(Palette.lime)
             }.padding(.horizontal)
-            Spacer()
-            Text("Messaging is unavailable until encrypted sessions are integrated.")
-                .font(.footnote).foregroundStyle(Palette.muted).multilineTextAlignment(.center).padding()
-            Spacer()
+            if !fingerprint.isEmpty && !verified {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Verify this device before sending")
+                        .font(.headline)
+                    Text("Compare this fingerprint with your friend in another trusted channel.")
+                        .font(.footnote).foregroundStyle(Palette.muted)
+                    Text(fingerprint).font(.caption2.monospaced())
+                        .foregroundStyle(Palette.lime).textSelection(.disabled)
+                    Button("I verified this fingerprint") {
+                        do {
+                            try messaging.verifyPeer(for: id)
+                            verified = true
+                            status = "Device verified"
+                        } catch { status = "Verification failed" }
+                    }.foregroundStyle(Palette.lime)
+                }
+                .padding(16).background(Palette.surface, in: RoundedRectangle(cornerRadius: 16))
+                .padding(.horizontal)
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(vault.messageRecords) { message in
+                        HStack {
+                            if message.isOutgoing { Spacer(minLength: 36) }
+                            VStack(alignment: message.isOutgoing ? .trailing : .leading, spacing: 3) {
+                                Text(message.body).padding(11)
+                                    .foregroundStyle(message.isOutgoing ? Palette.background : Palette.text)
+                                    .background(message.isOutgoing ? Palette.lime : Palette.surface,
+                                                in: RoundedRectangle(cornerRadius: 16))
+                                if message.isOutgoing {
+                                    Text(message.delivery == .delivered ? "Delivered" : "Sending")
+                                        .font(.caption2).foregroundStyle(Palette.muted)
+                                }
+                            }
+                            if !message.isOutgoing { Spacer(minLength: 36) }
+                        }
+                    }
+                }.padding(.horizontal)
+            }
+            if !status.isEmpty { Text(status).font(.caption).foregroundStyle(Palette.muted) }
             HStack(spacing: 12) {
                 Button { drawer.toggle() } label: { Image(systemName: "face.smiling") }
                     .accessibilityLabel("Stickers and emoji")
                 TextField("Message", text: $draft)
-                    .disabled(true)
+                    .disabled(!verified)
+                Button {
+                    let outgoing = draft
+                    draft = ""
+                    Task {
+                        do { try await messaging.send(outgoing, in: id) }
+                        catch MessagingError.identityVerificationRequired(let value) {
+                            fingerprint = value; verified = false; status = "Verify the device first"; draft = outgoing
+                        }
+                        catch { status = "Can't send"; draft = outgoing }
+                    }
+                } label: { Image(systemName: "arrow.up.circle.fill") }
+                    .disabled(!verified || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityLabel("Send message")
                 Button {} label: { Image(systemName: "paperclip") }
                     .disabled(true).accessibilityLabel("Attachments unavailable")
             }.padding(14).background(Palette.surface, in: Capsule()).padding(.horizontal)
@@ -349,7 +469,18 @@ private struct ConversationView: View {
         }
         .background(Palette.background).foregroundStyle(Palette.text)
         .sheet(isPresented: $showChangePassword) { ChangeChatPasswordView(id: id) }
-        .onDisappear { draft = ""; drawer = false }
+        .task {
+            do {
+                fingerprint = try await messaging.preparePeerVerification(for: id)
+                verified = try messaging.isPeerVerified(for: id)
+                if verified { try? await messaging.receive(in: id) }
+            } catch MessagingError.localChatOnly {
+                status = "Local draft — delivery is not configured"
+            } catch MessagingError.identityVerificationRequired(let value) {
+                fingerprint = value
+            } catch { status = "Can't connect" }
+        }
+        .onDisappear { draft = ""; drawer = false; vault.lockChat() }
     }
 }
 

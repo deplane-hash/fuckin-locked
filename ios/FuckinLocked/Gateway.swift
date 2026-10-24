@@ -38,6 +38,33 @@ struct PendingAdmission: Decodable, Identifiable { let id: String; let name: Str
 struct AdmissionsResponse: Decodable { let pending: [PendingAdmission] }
 struct DeviceInfo: Decodable, Identifiable { let id: String; let state: String; let created_at: Int }
 struct DevicesResponse: Decodable { let devices: [DeviceInfo] }
+struct RoomCreated: Decodable { let room_id: String }
+struct RoomDevice: Decodable { let id: String; let user_id: String }
+struct RoomDevices: Decodable { let devices: [RoomDevice] }
+struct RelayEnvelope: Codable {
+    let id: String
+    let room_id: String
+    let sender_device: String
+    let sender_user_id: String
+    let kind: String
+    let ciphertext: Data
+    let created_at: Int
+}
+struct RelayEnvelopes: Decodable { let envelopes: [RelayEnvelope] }
+struct RelayPrekeyBundle: Decodable {
+    let device_id: String
+    let registration_id: UInt32
+    let device_number: UInt32
+    let identity_key: Data
+    let signed_prekey_id: UInt32
+    let signed_prekey: Data
+    let signed_prekey_signature: Data
+    let one_time_prekey_id: UInt32
+    let one_time_prekey: Data
+    let kyber_prekey_id: UInt32
+    let kyber_prekey: Data
+    let kyber_prekey_signature: Data
+}
 
 @MainActor final class Gateway: ObservableObject {
     @Published private(set) var connected = false
@@ -160,6 +187,72 @@ struct DevicesResponse: Decodable { let devices: [DeviceInfo] }
     func revoke(_ id: String) async throws {
         guard token != nil else { throw ConnectionError.unavailable }
         let _: [String: String] = try await request("/v1/devices/\(id)/revoke", method: "POST", body: [:])
+    }
+
+    private func routeID(_ value: String) throws -> String {
+        guard !value.isEmpty, value.count <= 128,
+              value.utf8.allSatisfy({ ($0 >= 65 && $0 <= 90) || ($0 >= 97 && $0 <= 122) ||
+                                      ($0 >= 48 && $0 <= 57) || $0 == 45 || $0 == 95 }) else {
+            throw ConnectionError.invalidResponse
+        }
+        return value
+    }
+
+    func createOneToOneRoom(with userID: String) async throws -> String {
+        guard token != nil else { throw ConnectionError.unavailable }
+        let user = try routeID(userID)
+        let result: RoomCreated = try await request("/v1/rooms", method: "POST",
+                                                     body: ["user_ids": [user]])
+        return try routeID(result.room_id)
+    }
+
+    func roomDevices(_ roomID: String) async throws -> [RoomDevice] {
+        guard token != nil else { throw ConnectionError.unavailable }
+        let room = try routeID(roomID)
+        let result: RoomDevices = try await request("/v1/rooms/\(room)/devices")
+        return result.devices
+    }
+
+    func publishPrekeys(_ bundle: SignalPublicBundle, roomID: String) async throws {
+        guard token != nil else { throw ConnectionError.unavailable }
+        let room = try routeID(roomID)
+        let _: [String: String] = try await request("/v1/rooms/\(room)/prekeys",
+                                                    method: "POST", body: bundle.requestBody)
+    }
+
+    func takePrekeys(roomID: String, deviceID: String) async throws -> RelayPrekeyBundle {
+        guard token != nil else { throw ConnectionError.unavailable }
+        let room = try routeID(roomID)
+        let device = try routeID(deviceID)
+        return try await request("/v1/rooms/\(room)/prekeys/\(device)")
+    }
+
+    func sendEnvelope(roomID: String, recipientDevice: String, kind: String,
+                      ciphertext: Data) async throws -> String {
+        guard token != nil else { throw ConnectionError.unavailable }
+        let room = try routeID(roomID)
+        let recipient = try routeID(recipientDevice)
+        guard ["message", "attachment", "key_update"].contains(kind) else {
+            throw ConnectionError.invalidResponse
+        }
+        let result: [String: String] = try await request("/v1/envelopes", method: "POST", body: [
+            "room_id": room, "recipient_device": recipient, "kind": kind,
+            "ciphertext": ciphertext.base64EncodedString()
+        ])
+        guard let id = result["id"] else { throw ConnectionError.invalidResponse }
+        return try routeID(id)
+    }
+
+    func pendingEnvelopes() async throws -> [RelayEnvelope] {
+        guard token != nil else { throw ConnectionError.unavailable }
+        let result: RelayEnvelopes = try await request("/v1/envelopes")
+        return result.envelopes
+    }
+
+    func acknowledgeEnvelope(_ id: String) async throws {
+        guard token != nil else { throw ConnectionError.unavailable }
+        let _: [String: String] = try await request("/v1/envelopes/\(try routeID(id))/ack",
+                                                    method: "POST", body: [:])
     }
 
     func disconnect() {
