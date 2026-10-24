@@ -12,6 +12,11 @@ struct StoredChat: Codable, Identifiable {
     var ciphertext: Data
 }
 
+struct ChatPayload: Codable {
+    var messages: [String] = []
+    var signal: SignalState? = nil
+}
+
 struct StoredIndex: Codable {
     var chats: [StoredChat] = []
     var profileName: String = "You"
@@ -54,6 +59,7 @@ struct DelayLedger: Codable {
     @Published private(set) var messages: [String] = []
     private var appKey: SymmetricKey?
     private var chatKey: SymmetricKey?
+    private var chatPayload: ChatPayload?
     private var header: VaultHeader?
     private var index = StoredIndex()
     private let encoder = JSONEncoder()
@@ -261,7 +267,7 @@ struct DelayLedger: Codable {
         var candidate = index
         candidate.chats.append(StoredChat(id: UUID(), title: title, isGroup: isGroup, salt: salt,
             wrappedKey: try seal(raw, key: derive(password, salt: salt)),
-            ciphertext: try seal(encoder.encode([String]()), key: SymmetricKey(data: raw))))
+            ciphertext: try seal(encoder.encode(ChatPayload()), key: SymmetricKey(data: raw))))
         try save(candidate)
     }
 
@@ -283,19 +289,41 @@ struct DelayLedger: Codable {
         guard isUnlocked, let chat = index.chats.first(where: { $0.id == id }) else { throw VaultError.corrupt }
         try chatAllowed(id)
         let key: SymmetricKey
-        let content: [String]
+        let content: ChatPayload
         do {
             let raw = try open(chat.wrappedKey, key: derive(password, salt: chat.salt))
             key = SymmetricKey(data: raw)
-            content = try decoder.decode([String].self, from: open(chat.ciphertext, key: key))
+            let plaintext = try open(chat.ciphertext, key: key)
+            if let current = try? decoder.decode(ChatPayload.self, from: plaintext) {
+                content = current
+            } else {
+                content = ChatPayload(messages: try decoder.decode([String].self, from: plaintext))
+            }
         } catch {
             try failedChatAttempt(id)
             throw VaultError.invalidPassword
         }
         try resetChatDelay(id)
         chatKey = key
-        messages = content
+        chatPayload = content
+        messages = content.messages
         unlockedChatID = id
+    }
+
+    func signalState(for id: UUID) throws -> SignalState? {
+        guard isUnlocked, unlockedChatID == id, chatKey != nil else { throw VaultError.corrupt }
+        return chatPayload?.signal
+    }
+
+    func saveSignalState(_ state: SignalState, for id: UUID) throws {
+        guard isUnlocked, unlockedChatID == id, let chatKey,
+              let position = index.chats.firstIndex(where: { $0.id == id }),
+              var payload = chatPayload else { throw VaultError.corrupt }
+        payload.signal = state
+        var candidate = index
+        candidate.chats[position].ciphertext = try seal(encoder.encode(payload), key: chatKey)
+        try save(candidate)
+        chatPayload = payload
     }
 
     func changeChatPassword(_ id: UUID, old: String, new: String) throws {
@@ -322,6 +350,7 @@ struct DelayLedger: Codable {
 
     func lockChat() {
         messages.removeAll(keepingCapacity: false)
+        chatPayload = nil
         chatKey = nil
         unlockedChatID = nil
     }

@@ -1,4 +1,5 @@
 import XCTest
+import LibSignalClient
 @testable import FuckinLocked
 
 @MainActor final class LocalVaultTests: XCTestCase {
@@ -111,5 +112,39 @@ import XCTest
         try restarted.unlock("correct app password")
         try restarted.unlockChat(id, password: "new chat password")
         XCTAssertEqual(restarted.unlockedChatID, id)
+    }
+
+    func testProtocolIdentityNeedsChatPasswordAfterRestart() throws {
+        let root = folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = LocalVault(directory: root)
+        try first.createAppPassword("correct app password")
+        try first.createChat(title: "Friend", isGroup: false, password: "separate chat password")
+        let id = try XCTUnwrap(first.chats.first?.id)
+        try first.unlockChat(id, password: "separate chat password")
+        let state = SignalState.new()
+        try first.saveSignalState(state, for: id)
+        first.lockApp()
+
+        let restarted = LocalVault(directory: root)
+        try restarted.unlock("correct app password")
+        XCTAssertThrowsError(try restarted.signalState(for: id))
+        try restarted.unlockChat(id, password: "separate chat password")
+        XCTAssertEqual(try restarted.signalState(for: id)?.identityKeyPair, state.identityKeyPair)
+    }
+
+    func testProtocolIdentityChangeRequiresExplicitReview() throws {
+        let store = VaultSignalStore(state: .new())
+        let address = try ProtocolAddress(name: "room:peer", deviceId: 1)
+        let first = IdentityKeyPair.generate().identityKey
+        let changed = IdentityKeyPair.generate().identityKey
+        XCTAssertFalse(try store.isTrustedIdentity(first, for: address, direction: .sending,
+                                                    context: NullContext()))
+        try store.approveIdentity(first, for: address)
+        XCTAssertTrue(try store.isTrustedIdentity(first, for: address, direction: .sending,
+                                                  context: NullContext()))
+        XCTAssertThrowsError(try store.approveIdentity(changed, for: address))
+        XCTAssertFalse(try store.isTrustedIdentity(changed, for: address, direction: .sending,
+                                                    context: NullContext()))
     }
 }
