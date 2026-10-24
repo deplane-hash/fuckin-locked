@@ -7,7 +7,7 @@
 - `python3 -m py_compile service.py`: passed after relay changes.
 - Source scan for accidental app network endpoints, pasteboard, sharing, drag-and-drop, context menus, and arbitrary-load ATS setting. The source has one `URLSession` client, configured for HTTPS only, with redirects refused. No export APIs were found.
 
-## Supplied but not executed
+## Not executed on this Linux workspace
 
 - `ios/FuckinLockedTests/LocalVaultTests.swift` covers relocking, app and chat attempt delays across vault reinitialization, and password rewrapping. `SignalProtocolTests.swift` exercises a persistent two-store libsignal prekey/whisper round trip. This host is Linux; local Xcode tools are unavailable, so these tests run in the macOS GitHub Actions workflow rather than here.
 - `ios/Podfile` pins LibSignalClient and its prebuilt FFI checksum. CocoaPods installation and compilation now run in GitHub Actions on Xcode 26; the current run is the verification authority for the latest source. This does not prove live gateway delivery or signed-device behavior.
@@ -17,6 +17,12 @@
 - The relay's pinned `cryptography==50.0.2` needs a clean-environment install test. The server tests here used preinstalled 41.0.7.
 - TLS certificate validation and rotation need an actual gateway hostname and certificate. No server was deployed.
 
+## Remote macOS simulator verification
+
+- GitHub Actions run `40111100679` completed successfully on macOS 26.6 / Xcode 26.6. It generated the Xcode project, installed the pinned LibSignalClient CocoaPod, and ran `xcodebuild test` for the `FuckinLocked` scheme on an iPhone 17 simulator with code signing disabled.
+- That run compiled the app and executed the supplied vault tests plus `SignalProtocolTests`: the libsignal prekey/whisper round trip passed using two independently serialized stores. It also verifies the app/chat lock and persistent failed-attempt delay test code at simulator runtime.
+- The earlier Xcode 26 run `40110805303` failed only because `RelayPrekeyBundle` lacked `Encodable`; the fix is included in the successful run. Earlier Xcode 16.4/macOS 15 failures were toolchain incompatibilities with libsignal's generated Swift, not app protocol behavior.
+
 ## Security claims not yet verified or implemented
 
-The one-to-one libsignal session path and persistent-store round trip are implemented and covered by the simulator test suite. Attachment transfer, generic push, call media, group key rotation, secure new-device pairing UI, live two-device gateway delivery, capture/lifecycle device checks, and independent audit remain open. The relay tests establish opaque storage and authorization behavior; the Swift protocol test establishes client-side encryption/decryption but does not replace a live gateway test. No test here proves protection against a compromised OS, modified client, or malicious recipient.
+The one-to-one libsignal session path and persistent-store round trip are implemented and covered by the simulator test suite. Attachment transfer, generic push, call media, group key rotation, secure new-device pairing UI, live two-device gateway delivery, capture/lifecycle device checks, backup behavior, accessibility review, and independent audit remain open. The relay tests establish opaque storage and authorization behavior; the Swift protocol test establishes client-side encryption/decryption but does not replace a live gateway test. No test here proves protection against a compromised OS, modified client, or malicious recipient.
