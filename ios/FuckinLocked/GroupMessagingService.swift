@@ -247,9 +247,12 @@ enum GroupMessagingError: Error { case closed, verificationRequired }
         for key in byID.keys { byID[key]?.message.reactions = nil }
         for event in reactions.sorted(by: { $0.sentAt < $1.sentAt }) {
             guard let target = event.reactionTarget, let reaction = event.reaction else { continue }
-            for key in Array(byID.keys) where byID[key]?.message.id == target {
-                byID[key]?.message.reactions = byID[key]?.message.reactions ?? [:]
-                byID[key]?.message.reactions?[event.senderDeviceID ?? "peer"] = reaction
+            for key in Array(byID.keys) {
+                guard var item = byID[key], item.message.id == target else { continue }
+                var merged = item.message.reactions ?? [:]
+                merged[event.senderDeviceID ?? "peer"] = reaction
+                item.message.reactions = merged
+                byID[key] = item
             }
         }
         messages = byID.values.sorted { $0.message.sentAt < $1.message.sentAt }
