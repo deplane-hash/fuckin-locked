@@ -113,7 +113,7 @@ private struct CreatePasswordView: View {
                 PrimaryButton(title: "Create password") {
                     guard password == repeatPassword else { error = "Passwords do not match"; return }
                     do { try vault.createAppPassword(password); password = ""; repeatPassword = "" }
-                    catch { error = "Use at least 12 characters" }
+                    catch { self.error = "Use at least 12 characters" }
                 }
             })
         .onDisappear { password = ""; repeatPassword = "" }
@@ -133,7 +133,7 @@ private struct AppUnlockView: View {
                 PrimaryButton(title: "Unlock") {
                     do { try vault.unlock(password); password = ""; error = "" }
                     catch VaultError.delayed(let seconds) { error = "Try again in \(seconds) seconds" }
-                    catch { error = "Password incorrect" }
+                    catch { self.error = "Password incorrect" }
                 }
             })
         .onDisappear { password = "" }
@@ -274,7 +274,7 @@ private struct ComposeView: View {
                 if !error.isEmpty { Text(error).foregroundStyle(.red) }
                 PrimaryButton(title: "Create locked draft") {
                     do { try vault.createChat(title: title, isGroup: group, password: password); dismiss() }
-                    catch { error = "Enter a name and a password of at least 12 characters" }
+                    catch { self.error = "Enter a name and a password of at least 12 characters" }
                 }
                 Spacer()
             }.padding(22).background(Palette.background).foregroundStyle(Palette.text)
@@ -303,7 +303,7 @@ private struct ChatGateView: View {
                         PrimaryButton(title: "Unlock chat") {
                             do { try vault.unlockChat(id, password: password); password = "" }
                             catch VaultError.delayed(let seconds) { error = "Try again in \(seconds) seconds" }
-                            catch { error = "Password incorrect" }
+                            catch { self.error = "Password incorrect" }
                         }
                     })
             }
@@ -368,7 +368,7 @@ private struct ChangeChatPasswordView: View {
                 if !error.isEmpty { Text(error).foregroundStyle(.red) }
                 PrimaryButton(title: "Change chat password") {
                     do { try vault.changeChatPassword(id, old: old, new: new); dismiss() }
-                    catch { error = "Password change failed" }
+                    catch { self.error = "Password change failed" }
                 }
                 Spacer()
             }.padding(22).background(Palette.background)
@@ -416,7 +416,7 @@ private struct PeopleView: View {
                 }
                 PrimaryButton(title: "Invite a friend") {
                     Task { do { invitation = try await gateway.invite() }
-                        catch { error = "Can't connect" } }
+                        catch { self.error = "Can't connect" } }
                 }
                 if !admissions.isEmpty { Text("Approval requests").font(.headline) }
                 ForEach(admissions) { admission in
@@ -432,7 +432,7 @@ private struct PeopleView: View {
                                     try await gateway.approveAdmission(admission.id)
                                     admissions = try await gateway.pendingAdmissions()
                                     people = try await gateway.people()
-                                } catch { error = "Can't connect" }
+                                } catch { self.error = "Can't connect" }
                             }
                         }.foregroundStyle(Palette.lime)
                     }.padding(.vertical, 8)
@@ -457,7 +457,7 @@ private struct PeopleView: View {
                 people = try await gateway.people()
                 admissions = try await gateway.pendingAdmissions()
             }
-            catch { error = "Can't connect" }
+            catch { self.error = "Can't connect" }
         }
         .onDisappear {
             people.removeAll(keepingCapacity: false)
@@ -532,7 +532,7 @@ private struct ChangePasswordView: View {
                 if !error.isEmpty { Text(error).foregroundStyle(.red) }
                 PrimaryButton(title: "Change password") {
                     do { try vault.changeAppPassword(old: old, new: new); dismiss() }
-                    catch { error = "Password change failed" }
+                    catch { self.error = "Password change failed" }
                 }
                 Spacer()
             }.padding(22).background(Palette.background)
@@ -637,7 +637,7 @@ private struct DevicesView: View {
                                         try await gateway.revoke(device.id)
                                         if device.id == vault.deviceID { gateway.disconnect(); vault.lockApp() }
                                         else { devices = try await gateway.devices() }
-                                    } catch { error = "Can't connect" }
+                                    } catch { self.error = "Can't connect" }
                                 }
                             }
                         }
@@ -646,7 +646,7 @@ private struct DevicesView: View {
             }.navigationTitle("Authorized devices")
                 .task {
                     do { devices = try await gateway.devices() }
-                    catch { error = "Can't connect" }
+                    catch { self.error = "Can't connect" }
                 }
         }
         .onDisappear { devices.removeAll(keepingCapacity: false) }

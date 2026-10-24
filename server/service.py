@@ -308,7 +308,7 @@ def publish_prekeys(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, pa
     registration_id = int(payload["registration_id"])
     device_number = int(payload["device_number"])
     ids = tuple(int(payload[name]) for name in ("signed_prekey_id", "one_time_prekey_id", "kyber_prekey_id"))
-    require(1 <= registration_id <= 16380 and 1 <= device_number <= 2**31 - 1)
+    require(1 <= registration_id <= 16380 and 1 <= device_number <= 127)
     require(all(1 <= value <= 2**31 - 1 for value in ids))
     fields = tuple(b64(payload[name]) for name in PREKEY_FIELDS)
     require(32 <= len(fields[0]) <= 128 and 32 <= len(fields[1]) <= 128 and

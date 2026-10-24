@@ -12,6 +12,7 @@
 - `ios/FuckinLockedTests/LocalVaultTests.swift` covers relocking, app and chat attempt delays across vault reinitialization, and password rewrapping. The tests have not run. This host is Linux; `xcodebuild`, `xcrun`, `swift`, `pod`, and Xcode.app were not found, and no remote macOS build tool is connected.
 - `ios/Podfile` pins LibSignalClient and its prebuilt FFI checksum. CocoaPods installation succeeded in GitHub Actions. iOS compilation, simulator tests, and two-device exchange have not passed.
 - GitHub Actions macOS 15 with Xcode 16.4 installed the pod, then failed compiling libsignal v0.105.0 because generated Swift source uses tuple trailing commas unsupported by that compiler. The workflow now targets macOS 26 and Xcode 26 for a rerun.
+- The first Xcode 26 run compiled libsignal, then found view-state `error` names shadowed by Swift's implicit catch value. These app source compile errors were fixed; the simulator suite is being rerun.
 - iOS compilation, lifecycle transition timing, app-switcher snapshots, screenshot timing, capture state, VoiceOver, Dynamic Type, Reduce Motion, secure keyboard behavior, Keychain migration, and actual file protection attributes need testing on a signed device build.
 - The relay's pinned `cryptography==50.0.2` needs a clean-environment install test. The server tests here used preinstalled 41.0.7.
 - TLS certificate validation and rotation need an actual gateway hostname and certificate. No server was deployed.
