@@ -159,11 +159,13 @@ private struct AppUnlockView: View {
     @EnvironmentObject var vault: LocalVault
     @State private var password = ""
     @State private var error = ""
+    @FocusState private var passwordFocused: Bool
     var body: some View {
         PasswordLayout(title: "fuckin locked", subtitle: "This app locks whenever you leave it.", content:
             VStack(spacing: 14) {
                 SecureField("App password", text: $password)
                     .textContentType(.password).flField()
+                    .focused($passwordFocused)
                 if !error.isEmpty { Text(error).foregroundStyle(.red).font(.footnote) }
                 PrimaryButton(title: "Unlock") {
                     do { try vault.unlock(password); password = ""; error = "" }
@@ -171,7 +173,13 @@ private struct AppUnlockView: View {
                     catch { self.error = "Password incorrect" }
                 }
             })
-        .onDisappear { password = "" }
+        .onAppear {
+            // Re-focus after the native privacy shield has covered and
+            // uncovered the scene. This only targets the password field; it
+            // never unlocks or retains authentication state.
+            DispatchQueue.main.async { passwordFocused = true }
+        }
+        .onDisappear { password = ""; passwordFocused = false }
     }
 }
 
