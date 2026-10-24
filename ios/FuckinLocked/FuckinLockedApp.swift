@@ -435,7 +435,7 @@ private struct ComposeView: View {
                 peerDevices = try await gateway.memberDevices(userID)
                 try Task.checkCancellation()
                 if peerDevices.count == 1 { peerDeviceID = peerDevices[0].id }
-            } catch { error = "Can't load approved devices" }
+            } catch { self.error = "Can't load approved devices" }
         }
         .onDisappear { title = ""; password = ""; selection = ""; rooms.removeAll(keepingCapacity: false) }
     }
@@ -663,7 +663,7 @@ private struct ConversationView: View {
                         ownFingerprint = (try? messaging.ownFingerprint(for: id)) ?? ""
                         status = ""
                     }
-                } catch SignalError.untrustedIdentity {
+                } catch SignalError.untrustedIdentity(_) {
                     verified = false; identityMismatch = true
                     status = "Device identity changed. Messaging stopped. Compare identities with your friend before starting a new verified chat."
                     return

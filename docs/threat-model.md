@@ -23,4 +23,20 @@ On inactive scene state the app immediately replaces content with a plain cover 
 
 ## Open risks
 
+The current milestone adds bounded still-image/sticker transport and reactions
+inside libsignal messages, an encrypted retry queue with stable upload IDs,
+requester-scoped recoverable prekey claims, and explicit public-key device linking
+with a ten-minute approval expiry. Chat identity/session operations occur in
+synchronous scopes rather than retaining private protocol stores across network
+awaits. Scene-local capture state and an opaque UIKit window supplement the
+SwiftUI inactive cover; physical-device timing remains unverified. The system
+Photos picker may use iCloud connections outside the app gateway. There is no
+app-owned plaintext media cache. See `verification.md` for current pass/fail status.
+
+Historical limitations below that say attachment exchange or pairing UI are absent
+refer to the original foundation: still images and manual compared-key pairing
+are now implemented, while general/animated files, QR pairing, group messaging,
+push and calls remain unfinished. Each chat binds one remote device; adding a
+device never silently authorizes it in existing protocol sessions.
+
 There is no attachment exchange, push, calls, group key rotation, secure new-device pairing UI, or independent review. The relay is a control-plane and ciphertext-storage prototype, not proof of complete secure messaging. Its one-time prekey endpoint is integrated for the first one-to-one session but needs replenishment/exhaustion handling for normal asynchronous operation. The current chat binding supports one remote device; adding devices requires a separate approved binding and rekey design. SwiftUI's transient string and data buffers cannot be guaranteed wiped. Apple's backup exclusion is a resource hint and needs device-level verification; a backup policy should additionally exclude the app's private files. The relay's metadata requires encrypted server storage and operational access control, even though names and usernames are field-encrypted. Server backups, if enabled, must also be encrypted and must never contain plaintext content.

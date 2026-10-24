@@ -1,5 +1,36 @@
 # Verification report — 2026-10-24
 
+## Current milestone status (supersedes historical notes below)
+
+- The local relay suite now has **18 passing tests**, including actual HTTP route
+  dispatch/auth, stable ciphertext upload IDs/conflict detection, sender-only
+  delivery status, expiring device approval and recoverable requester-scoped
+  prekey claims. No production database or live accounts are used by these tests.
+- Expanded Xcode runs `40129471328` and `40130411164` compiled the app but failed
+  the explicitly enabled relay integration test with a connection error. This
+  corrects the earlier assumption that a successful build proved that integration
+  test ran: setting a shell variable alone did not establish test-runner activation.
+- The CI-only scheme now passes the fixture enable flag directly to the test
+  runner. Results are preserved as an `.xcresult` and include failure summaries.
+- Run `40131001883` found a new compose-view catch-variable compile error; that
+  error is fixed in the working source. The newest rerun must be checked before
+  calling this source a buildable or verified beta.
+- Added source/tests: persisted encrypted outbox; distinct Sent/Delivered states;
+  images/reactions; original stickers and encrypted preferences; explicit device
+  linking; synchronous native inactive cover; scene-local capture observation;
+  generation checks rejecting stale async completions; password-wrapper failure
+  recovery; and real simulator background/relaunch UI coverage. New tests are not
+  reported as passed until the matching Xcode run succeeds.
+- No new source in this milestone has been installed on physical iPhones. Live
+  two-device E2E, screenshots/recording/mirroring, snapshot timing, backup behavior
+  and full accessibility checks remain unverified. See `device-checks.md`.
+- Source changes are not automatically deployed to the live relay. The new client
+  requires matching authenticated relay capabilities and fails closed on an older
+  service. The prior signing failure requires valid matching repository secrets.
+
+The following sections record earlier results and limitations for traceability;
+their old feature counts and pending-work descriptions are historical.
+
 ## Executed in this environment
 
 - `python3 -m py_compile server/service.py`: passed.
