@@ -18,6 +18,8 @@ private func makeGatewaySession() -> URLSession {
     configuration.urlCache = nil
     configuration.httpShouldSetCookies = false
     configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+    configuration.timeoutIntervalForRequest = 15
+    configuration.timeoutIntervalForResource = 30
     return URLSession(configuration: configuration, delegate: NoRedirects(), delegateQueue: nil)
 }
 
@@ -86,14 +88,17 @@ struct RelayPrekeyBundle: Codable {
     @Published private(set) var connected = false
     private let baseOverride: URL?
     private let identityAccount: String
+    private let diagnostics: ((Int) -> Void)?
     private var token: String?
     private var generation = 0
     private var session = makeGatewaySession()
 
     init(baseURL: URL? = nil, session: URLSession? = nil,
-         identityAccount: String = DeviceIdentity.defaultAccount) {
+         identityAccount: String = DeviceIdentity.defaultAccount,
+         diagnostics: ((Int) -> Void)? = nil) {
         baseOverride = baseURL
         self.identityAccount = identityAccount
+        self.diagnostics = diagnostics
         if let session { self.session = session }
     }
 
@@ -134,6 +139,7 @@ struct RelayPrekeyBundle: Codable {
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         do {
             let (data, response) = try await session.data(for: request)
+            diagnostics?((response as? HTTPURLResponse)?.statusCode ?? -1)
             guard started == generation else { throw ConnectionError.unavailable }
             guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
                 throw ConnectionError.unavailable
@@ -141,6 +147,7 @@ struct RelayPrekeyBundle: Codable {
             connected = true
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
+            diagnostics?((error as NSError).code)
             if started == generation { connected = false }
             throw ConnectionError.unavailable
         }
@@ -171,12 +178,14 @@ struct RelayPrekeyBundle: Codable {
         ])
         do {
             let (data, response) = try await session.data(for: request)
+            diagnostics?((response as? HTTPURLResponse)?.statusCode ?? -1)
             guard started == generation else { throw ConnectionError.unavailable }
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw ConnectionError.unavailable }
             let result = try JSONDecoder().decode(BootstrapResult.self, from: data)
             connected = true
             return result
         } catch {
+            diagnostics?((error as NSError).code)
             if started == generation { connected = false }
             throw ConnectionError.unavailable
         }
@@ -205,7 +214,7 @@ struct RelayPrekeyBundle: Codable {
 
     func requireMessagingCapabilities() async throws {
         let result: [String: [String]] = try await request("/v1/capabilities")
-        let required: Set<String> = ["idempotent_envelopes_v1", "delivery_status_v1", "room_inbox_v1"]
+        let required: Set<String> = ["idempotent_envelopes_v1", "delivery_status_v1", "room_inbox_v1", "idempotent_prekeys_v1"]
         guard required.isSubset(of: Set(result["capabilities"] ?? [])) else {
             throw ConnectionError.unavailable
         }
@@ -295,6 +304,11 @@ struct RelayPrekeyBundle: Codable {
         return result.devices
     }
 
+    func memberDevices(_ userID: String) async throws -> [RoomDevice] {
+        let result: RoomDevices = try await request("/v1/people/\(try routeID(userID))/devices")
+        return result.devices
+    }
+
     func publishPrekeys(_ bundle: SignalPublicBundle, roomID: String) async throws {
         guard token != nil else { throw ConnectionError.unavailable }
         let room = try routeID(roomID)
@@ -302,11 +316,12 @@ struct RelayPrekeyBundle: Codable {
                                                     method: "POST", body: bundle.requestBody)
     }
 
-    func takePrekeys(roomID: String, deviceID: String) async throws -> RelayPrekeyBundle {
+    func takePrekeys(roomID: String, deviceID: String, requestID: UUID? = nil) async throws -> RelayPrekeyBundle {
         guard token != nil else { throw ConnectionError.unavailable }
         let room = try routeID(roomID)
         let device = try routeID(deviceID)
-        return try await request("/v1/rooms/\(room)/prekeys/\(device)")
+        let suffix = requestID.map { "/\($0.uuidString)" } ?? ""
+        return try await request("/v1/rooms/\(room)/prekeys/\(device)\(suffix)")
     }
 
     func sendEnvelope(roomID: String, recipientDevice: String, kind: String,

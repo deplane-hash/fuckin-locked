@@ -4,6 +4,10 @@ import sqlite3
 import tempfile
 import time
 import unittest
+import json
+import http.client
+import threading
+from http.server import ThreadingHTTPServer
 from concurrent.futures import ThreadPoolExecutor
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -30,6 +34,48 @@ def sample_bundle(identity=None):
 
 
 class RelayTests(unittest.TestCase):
+    def test_http_routes_enforce_auth_and_reach_messaging_handlers(self):
+        code = service.create_invitation(self.db, self.actor["device_id"])
+        friend = service.redeem_invitation(self.db, code, "Friend", "friend", pub(Ed25519PrivateKey.generate()))
+        service.approve_admission(self.db, self.actor, friend["admission_id"])
+        room = service.create_room(self.db, self.actor, [friend["user_id"]])
+        recipient = service.active_session(self.db, service.issue_session(self.db, friend["device_id"]))
+        self.db.commit()
+        service.publish_prekeys(self.db, recipient, room, sample_bundle())
+        handler = type("FixtureHandler", (service.Handler,), {"db_path": os.path.join(self.temp.name, "db.sqlite")})
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+
+        def request(path, method="GET", body=None, authenticated=True):
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+            headers = {"Content-Type": "application/json"}
+            if authenticated:
+                headers["Authorization"] = "Bearer " + self.owner_session
+            try:
+                connection.request(method, path, json.dumps(body) if body is not None else None, headers)
+                response = connection.getresponse()
+                return response.status, json.loads(response.read())
+            finally:
+                connection.close()
+
+        try:
+            for path in ["/v1/capabilities", "/v1/me", "/v1/rooms",
+                         f"/v1/people/{friend['user_id']}/devices", f"/v1/rooms/{room}/devices",
+                         f"/v1/rooms/{room}/envelopes/pending"]:
+                self.assertEqual(request(path)[0], 200, path)
+                self.assertEqual(request(path, authenticated=False)[0], 401, path)
+            self.assertEqual(request(f"/v1/rooms/{room}/prekeys/{friend['device_id']}/request-one")[0], 200)
+            status, result = request("/v1/envelopes", "POST", {
+                "room_id": room, "recipient_device": friend["device_id"], "kind": "message",
+                "ciphertext": base64.b64encode(os.urandom(96)).decode(), "message_id": "http-one"})
+            self.assertEqual(status, 200)
+            self.assertEqual(request(f"/v1/envelopes/{result['id']}/status"), (200, {"state": "accepted"}))
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join()
+
     def test_retry_is_idempotent_and_delivery_status_is_sender_only(self):
         code = service.create_invitation(self.db, self.actor["device_id"])
         friend = service.redeem_invitation(self.db, code, "Friend", "friend", pub(Ed25519PrivateKey.generate()))
@@ -195,6 +241,28 @@ class RelayTests(unittest.TestCase):
         service.revoke_device(self.db, friend_actor, friend["device_id"])
         with self.assertRaises(service.Error):
             service.take_prekeys(self.db, self.actor, room, friend["device_id"])
+
+    def test_prekey_claim_retries_return_only_the_original_requesters_bundle(self):
+        code = service.create_invitation(self.db, self.actor["device_id"])
+        friend = service.redeem_invitation(self.db, code, "Friend", "friend", pub(Ed25519PrivateKey.generate()))
+        service.approve_admission(self.db, self.actor, friend["admission_id"])
+        room = service.create_room(self.db, self.actor, [friend["user_id"]])
+        recipient = service.active_session(self.db, service.issue_session(self.db, friend["device_id"]))
+        self.db.commit()
+        service.publish_prekeys(self.db, recipient, room, sample_bundle())
+        first = service.take_prekeys(self.db, self.actor, room, friend["device_id"], "request-one")
+        self.assertEqual(service.take_prekeys(self.db, self.actor, room, friend["device_id"], "request-one"), first)
+        with self.assertRaises(service.Error):
+            service.take_prekeys(self.db, self.actor, room, friend["device_id"], "request-two")
+        second_device = service.request_device(self.db, self.actor, pub(Ed25519PrivateKey.generate()))
+        service.approve_device(self.db, self.actor, second_device)
+        second_actor = service.active_session(self.db, service.issue_session(self.db, second_device))
+        self.db.commit()
+        with self.assertRaises(service.Error):
+            service.take_prekeys(self.db, second_actor, room, friend["device_id"], "request-one")
+        service.revoke_device(self.db, recipient, friend["device_id"])
+        with self.assertRaises(service.Error):
+            service.take_prekeys(self.db, self.actor, room, friend["device_id"], "request-one")
 
     def test_member_names_are_encrypted_at_rest(self):
         row = self.db.execute("SELECT name,username,username_hash FROM users WHERE id=?",

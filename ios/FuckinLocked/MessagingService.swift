@@ -38,6 +38,10 @@ enum MessagingError: Error {
         self.gateway = gateway
     }
 
+    func clearTransientState() {
+        pendingFingerprints.removeAll(keepingCapacity: false)
+    }
+
     private func metadata(for id: UUID) throws -> StoredChat {
         let chat = try vault.chatMetadata(for: id)
         guard !chat.isGroup, let roomID = chat.roomID,
@@ -68,7 +72,7 @@ enum MessagingError: Error {
         return (local, remote)
     }
 
-    private func ensureLocalPrekeys(for id: UUID, roomID: String) async throws {
+    private func localPublicBundle(for id: UUID) throws -> SignalPublicBundle {
         var state = try vault.signalState(for: id) ?? SignalState.new()
         let store = VaultSignalStore(state: state)
         let bundle: SignalPublicBundle
@@ -79,6 +83,11 @@ enum MessagingError: Error {
             state = store.state
             try vault.saveSignalState(state, for: id)
         }
+        return bundle
+    }
+
+    private func ensureLocalPrekeys(for id: UUID, roomID: String) async throws {
+        let bundle = try localPublicBundle(for: id)
         try await gateway.publishPrekeys(bundle, roomID: roomID)
     }
 
@@ -87,7 +96,8 @@ enum MessagingError: Error {
         guard let roomID = chat.roomID, let deviceID = chat.remoteDeviceID else {
             throw MessagingError.localChatOnly
         }
-        let bundle = try await gateway.takePrekeys(roomID: roomID, deviceID: deviceID)
+        let requestID = try vault.prekeyRequestID(for: id)
+        let bundle = try await gateway.takePrekeys(roomID: roomID, deviceID: deviceID, requestID: requestID)
         try check(id, generation: generation)
         guard bundle.device_id == deviceID, bundle.device_number == 1 else {
             throw MessagingError.unexpectedSender
@@ -164,6 +174,18 @@ enum MessagingError: Error {
         defer { working = false }
         let generation = vault.chatGeneration
         try check(id, generation: generation)
+        let chat = try enqueueContent(content, in: id)
+        // No protocol store or private key reference is carried over an await.
+        do {
+            try await login()
+            try check(id, generation: generation)
+            try await flushOutbox(in: id, chat: chat, generation: generation)
+        } catch {
+            throw MessagingError.queued
+        }
+    }
+
+    private func enqueueContent(_ content: MessageContent, in id: UUID) throws -> StoredChat {
         let chat = try metadata(for: id)
         guard let bundle = try vault.pendingPeerBundle(for: id) else {
             throw MessagingError.unavailable
@@ -192,13 +214,7 @@ enum MessagingError: Error {
         try vault.commitChat(state: state, message: message, for: id)
         // Persist the exact wire bytes together with the advanced ratchet before
         // upload. Retries must reuse both these bytes and this stable ID.
-        do {
-            try await login()
-            try check(id, generation: generation)
-            try await flushOutbox(in: id, chat: chat, generation: generation)
-        } catch {
-            throw MessagingError.queued
-        }
+        return chat
     }
 
     func receive(in id: UUID) async throws {
@@ -233,6 +249,24 @@ enum MessagingError: Error {
                 try await gateway.acknowledgeEnvelope(envelope.id)
                 continue
             }
+            try decryptEnvelope(envelope, in: id)
+            try await gateway.acknowledgeEnvelope(envelope.id)
+        }
+        try check(id, generation: generation)
+        // Delivery acknowledges durable recipient storage, never a read receipt.
+        let receipts = vault.messageRecords.filter { $0.isOutgoing && $0.delivery == .accepted }
+            .compactMap { message in message.envelopeID.map { (message.id, $0) } }
+        for (messageID, envelopeID) in receipts {
+            let status = try await gateway.envelopeStatus(envelopeID)
+            try check(id, generation: generation)
+            if status == "delivered" {
+                try vault.markMessageDelivered(messageID, envelopeID: envelopeID,
+                                               for: id, delivery: .delivered)
+            }
+        }
+    }
+
+    private func decryptEnvelope(_ envelope: RelayEnvelope, in id: UUID) throws {
             var state = try vault.signalState(for: id) ?? SignalState.new()
             let store = VaultSignalStore(state: state)
             let local = try localAddress()
@@ -271,33 +305,22 @@ enum MessagingError: Error {
             state = store.state
             try vault.commitReceived(state: state, message: message,
                                      envelopeID: envelope.id, for: id)
-            try await gateway.acknowledgeEnvelope(envelope.id)
-        }
-        try check(id, generation: generation)
-        // Delivery acknowledges durable recipient storage, never a read receipt.
-        for message in vault.messageRecords where message.isOutgoing && message.delivery == .accepted {
-            guard let envelopeID = message.envelopeID else { continue }
-            let status = try await gateway.envelopeStatus(envelopeID)
-            try check(id, generation: generation)
-            if status == "delivered" {
-                try vault.markMessageDelivered(message.id, envelopeID: envelopeID,
-                                               for: id, delivery: .delivered)
-            }
-        }
     }
 
     private func flushOutbox(in id: UUID, chat: StoredChat, generation: UInt64) async throws {
         guard let roomID = chat.roomID, let remote = chat.remoteDeviceID else {
             throw MessagingError.localChatOnly
         }
-        for message in vault.messageRecords where message.isOutgoing && message.delivery == .sending {
+        let pending = vault.messageRecords.filter { $0.isOutgoing && $0.delivery == .sending }
+            .map { ($0.id, $0.ciphertext) }
+        for (messageID, ciphertext) in pending {
             try check(id, generation: generation)
-            guard let wire = message.ciphertext else { throw MessagingError.invalidMessage }
+            guard let wire = ciphertext else { throw MessagingError.invalidMessage }
             let envelopeID = try await gateway.sendEnvelope(roomID: roomID,
                 recipientDevice: remote, kind: "message", ciphertext: wire,
-                messageID: message.id.uuidString)
+                messageID: messageID.uuidString)
             try check(id, generation: generation)
-            try vault.markMessageDelivered(message.id, envelopeID: envelopeID, for: id)
+            try vault.markMessageDelivered(messageID, envelopeID: envelopeID, for: id)
         }
     }
 }

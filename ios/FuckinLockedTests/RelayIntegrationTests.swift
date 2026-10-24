@@ -40,18 +40,25 @@ private final class LoopbackTrustDelegate: NSObject, URLSessionDelegate, URLSess
         guard ProcessInfo.processInfo.environment["FL_RUN_RELAY_INTEGRATION"] == "1" else {
             throw XCTSkip("The local HTTPS relay fixture is enabled by the macOS workflow")
         }
-
+        var stage = "trusted HTTPS health"
+        do {
         let delegate = LoopbackTrustDelegate()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil
         configuration.httpShouldSetCookies = false
+        configuration.timeoutIntervalForRequest = 15
+        configuration.timeoutIntervalForResource = 30
         let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
         let baseURL = try XCTUnwrap(URL(string: "https://127.0.0.1:8787/fuckin-locked/"))
+        let (_, healthResponse) = try await session.data(from: baseURL.appendingPathComponent("health"))
+        XCTAssertEqual((healthResponse as? HTTPURLResponse)?.statusCode, 200)
         let suffix = UUID().uuidString.lowercased()
         let aliceGateway = Gateway(baseURL: baseURL, session: session,
-                                   identityAccount: "relay-integration-alice-\(suffix)")
+                                   identityAccount: "relay-integration-alice-\(suffix)",
+                                   diagnostics: { print("Alice fixture HTTP/error code: \($0)") })
         let bobGateway = Gateway(baseURL: baseURL, session: session,
-                                 identityAccount: "relay-integration-bob-\(suffix)")
+                                 identityAccount: "relay-integration-bob-\(suffix)",
+                                 diagnostics: { print("Bob fixture HTTP/error code: \($0)") })
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("fuckin-locked-relay-integration-\(suffix)")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -61,11 +68,13 @@ private final class LoopbackTrustDelegate: NSObject, URLSessionDelegate, URLSess
         try aliceVault.createAppPassword("alice app password")
         try bobVault.createAppPassword("bob app password")
 
+        stage = "first device bootstrap"
         let aliceBootstrap = try await aliceGateway.bootstrap(token: "ci-bootstrap-token",
                                                                name: "Alice", username: "alice")
         try aliceVault.setProfile(name: "Alice", username: "alice",
                                   userID: aliceBootstrap.user_id, deviceID: aliceBootstrap.device_id)
         try await aliceGateway.login(deviceID: aliceBootstrap.device_id)
+        stage = "invitation and approval"
         let invitation = try await aliceGateway.invite()
         let admission = try await bobGateway.enroll(code: invitation, name: "Bob", username: "bob")
         try await aliceGateway.approveAdmission(admission.admission_id)
@@ -75,6 +84,7 @@ private final class LoopbackTrustDelegate: NSObject, URLSessionDelegate, URLSess
         try await bobGateway.login(deviceID: bobDeviceID)
 
         let people = try await aliceGateway.people()
+        stage = "room creation"
         let bobPerson = try XCTUnwrap(people.first(where: { $0.id == admission.user_id }))
         let roomID = try await aliceGateway.createOneToOneRoom(with: bobPerson.id)
         let aliceDevices = try await aliceGateway.roomDevices(roomID)
@@ -109,6 +119,7 @@ private final class LoopbackTrustDelegate: NSObject, URLSessionDelegate, URLSess
 
         let aliceMessaging = MessagingService(vault: aliceVault, gateway: aliceGateway)
         let bobMessaging = MessagingService(vault: bobVault, gateway: bobGateway)
+        stage = "identity verification and prekeys"
         let alicePeerFingerprint = try await aliceMessaging.preparePeerVerification(for: aliceChatID)
         let bobPeerFingerprint = try await bobMessaging.preparePeerVerification(for: bobChatID)
         XCTAssertFalse(alicePeerFingerprint.isEmpty)
@@ -116,12 +127,14 @@ private final class LoopbackTrustDelegate: NSObject, URLSessionDelegate, URLSess
         try aliceMessaging.verifyPeer(for: aliceChatID)
         try bobMessaging.verifyPeer(for: bobChatID)
 
+        stage = "Alice sends and Bob receives"
         try await aliceMessaging.send("hello from alice", in: aliceChatID)
         XCTAssertEqual(aliceVault.messageRecords.last?.delivery, .accepted)
         try await bobMessaging.receive(in: bobChatID)
         XCTAssertEqual(bobVault.messageRecords.last?.body, "hello from alice")
         XCTAssertEqual(bobVault.messageRecords.last?.isOutgoing, false)
 
+        stage = "Bob replies"
         try await bobMessaging.send("hello from bob", in: bobChatID)
         try await aliceMessaging.receive(in: aliceChatID)
         XCTAssertEqual(aliceVault.messageRecords.last?.body, "hello from bob")
@@ -130,16 +143,19 @@ private final class LoopbackTrustDelegate: NSObject, URLSessionDelegate, URLSess
         XCTAssertEqual(aliceVault.messageRecords.first?.delivery, .delivered)
         XCTAssertEqual(aliceVault.messageRecords.filter { !$0.isOutgoing }.count, 1)
         // Reopening from disk requires both passwords and preserves the ratchet.
+        stage = "restart and ratchet persistence"
         bobVault.lockApp()
         try bobVault.unlock("bob app password")
         try bobVault.unlockChat(bobChatID, password: "bob chat password")
         try await bobMessaging.send("after restart", in: bobChatID)
         try await aliceMessaging.receive(in: aliceChatID)
         XCTAssertEqual(aliceVault.messageRecords.last?.body, "after restart")
+        stage = "encrypted reactions"
         let target = try XCTUnwrap(bobVault.messageRecords.first(where: { !$0.isOutgoing })?.id)
         try await bobMessaging.react("💚", to: target, in: bobChatID)
         try await aliceMessaging.receive(in: aliceChatID)
         XCTAssertEqual(aliceVault.messageRecords.first(where: { $0.id == target })?.reactions?["peer"], "💚")
+        stage = "encrypted images"
         let raster = UIGraphicsImageRenderer(size: CGSize(width: 20, height: 20)).image { context in
             UIColor.green.setFill()
             context.fill(CGRect(x: 0, y: 0, width: 20, height: 20))
@@ -152,5 +168,9 @@ private final class LoopbackTrustDelegate: NSObject, URLSessionDelegate, URLSess
         let saved = try Data(contentsOf: root.appendingPathComponent("bob/vault.bin"))
         XCTAssertNil(saved.range(of: jpeg))
         XCTAssertFalse(String(decoding: saved, as: UTF8.self).contains("hello from alice"))
+        } catch {
+            XCTFail("Relay integration failed at: \(stage). Error type: \(type(of: error))")
+            throw error
+        }
     }
 }

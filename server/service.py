@@ -88,6 +88,10 @@ def connect(path: str = DB_PATH) -> sqlite3.Connection:
       kyber_prekey_id INTEGER NOT NULL, kyber_prekey BLOB NOT NULL,
       kyber_prekey_signature BLOB NOT NULL, consumed_at INTEGER,
       PRIMARY KEY(room_id,device_id));
+    CREATE TABLE IF NOT EXISTS prekey_claims(
+      room_id TEXT NOT NULL, target_device TEXT NOT NULL, requester_device TEXT NOT NULL,
+      request_id TEXT NOT NULL, bundle TEXT NOT NULL,
+      PRIMARY KEY(room_id,target_device,requester_device,request_id));
     """)
     db.commit()
     return db
@@ -218,6 +222,7 @@ def revoke_device(db: sqlite3.Connection, actor: sqlite3.Row, device_id: str) ->
                    (int(time.time()), device_id))
         db.execute("DELETE FROM envelopes WHERE recipient_device=? AND delivered_at IS NULL", (device_id,))
         db.execute("DELETE FROM prekey_bundles WHERE device_id=?", (device_id,))
+        db.execute("DELETE FROM prekey_claims WHERE target_device=? OR requester_device=?", (device_id, device_id))
         db.commit()
     except Exception:
         db.rollback()
@@ -392,12 +397,23 @@ def publish_prekeys(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, pa
         raise
 
 
-def take_prekeys(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, target_device: str) -> dict:
+def take_prekeys(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, target_device: str,
+                 request_id: str | None = None) -> dict:
+    if request_id is not None:
+        require(isinstance(request_id, str) and 1 <= len(request_id) <= 128 and
+                all(c in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for c in request_id))
     db.execute("BEGIN IMMEDIATE")
     try:
         require(_room_device_authorized(db, room_id, actor["device_id"]) and
                 _room_device_authorized(db, room_id, target_device), 403, "Not authorized")
         require(actor["device_id"] != target_device, 403, "Not authorized")
+        if request_id is not None:
+            claim = db.execute("""SELECT bundle FROM prekey_claims WHERE room_id=? AND target_device=?
+                AND requester_device=? AND request_id=?""",
+                (room_id, target_device, actor["device_id"], request_id)).fetchone()
+            if claim is not None:
+                db.commit()
+                return json.loads(claim["bundle"])
         row = db.execute("SELECT * FROM prekey_bundles WHERE room_id=? AND device_id=? AND consumed_at IS NULL",
                          (room_id, target_device)).fetchone()
         require(row is not None, 404, "Prekey bundle unavailable")
@@ -408,6 +424,9 @@ def take_prekeys(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, targe
                                                 "one_time_prekey_id", "kyber_prekey_id")}
         result.update({name: base64.b64encode(row[name]).decode() for name in PREKEY_FIELDS})
         result["device_id"] = target_device
+        if request_id is not None:
+            db.execute("INSERT INTO prekey_claims VALUES(?,?,?,?,?)",
+                (room_id, target_device, actor["device_id"], request_id, json.dumps(result)))
         db.commit()
         return result
     except Exception:
@@ -475,6 +494,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def dispatch(self):
         path = urlparse(self.path).path
+        parts = path.strip("/").split("/")
         length = int(self.headers.get("Content-Length", "0"))
         require(0 <= length <= MAX_BODY * 2, 413, "Request too large")
         data = json.loads(self.rfile.read(length)) if length else {}
@@ -507,7 +527,7 @@ class Handler(BaseHTTPRequestHandler):
                 return {"token": verify_login(db, data["device_id"], data["challenge"], data["signature"])}
             actor = active_session(db, self.headers.get("Authorization", "").removeprefix("Bearer "))
             if self.command == "GET" and path == "/v1/capabilities":
-                return {"capabilities": ["idempotent_envelopes_v1", "delivery_status_v1", "room_inbox_v1"]}
+                return {"capabilities": ["idempotent_envelopes_v1", "delivery_status_v1", "room_inbox_v1", "idempotent_prekeys_v1"]}
             if self.command == "GET" and path == "/v1/me":
                 row = db.execute("SELECT name,username FROM users WHERE id=?", (actor["user_id"],)).fetchone()
                 return {"user_id": actor["user_id"], "device_id": actor["device_id"],
@@ -534,11 +554,14 @@ class Handler(BaseHTTPRequestHandler):
                     JOIN devices d ON d.user_id=u.id WHERE d.state='active'""").fetchall()
                 return {"people": [{"id": row["id"], "name": reveal(row["name"], "name"),
                     "username": reveal(row["username"], "username")} for row in rows]}
+            if self.command == "GET" and len(parts) == 4 and parts[:2] == ["v1", "people"] and parts[3] == "devices":
+                rows = db.execute("SELECT id,user_id FROM devices WHERE user_id=? AND state='active' ORDER BY created_at,id",
+                                  (parts[2],)).fetchall()
+                return {"devices": [dict(row) for row in rows]}
             if self.command == "POST" and path == "/v1/rooms":
                 return {"room_id": create_room(db, actor, data["user_ids"])}
             if self.command == "GET" and path == "/v1/rooms":
                 return {"rooms": list_rooms(db, actor)}
-            parts = path.strip("/").split("/")
             if len(parts) == 4 and parts[:2] == ["v1", "rooms"] and parts[3] == "devices" and self.command == "GET":
                 room_id = parts[2]
                 require(_room_device_authorized(db, room_id, actor["device_id"]), 403, "Not authorized")
@@ -550,6 +573,8 @@ class Handler(BaseHTTPRequestHandler):
                 return {"state": "published"}
             if len(parts) == 5 and parts[:2] == ["v1", "rooms"] and parts[3] == "prekeys" and self.command == "GET":
                 return take_prekeys(db, actor, parts[2], parts[4])
+            if len(parts) == 6 and parts[:2] == ["v1", "rooms"] and parts[3] == "prekeys" and self.command == "GET":
+                return take_prekeys(db, actor, parts[2], parts[4], parts[5])
             if self.command == "POST" and path == "/v1/envelopes":
                 return {"id": send_envelope(db, actor, data["room_id"], data["recipient_device"],
                                             data["kind"], data["ciphertext"], data.get("message_id"))}

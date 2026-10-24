@@ -11,6 +11,11 @@ import service
 class PrefixHandler(service.Handler):
     """Expose the relay below the same path prefix used by production nginx."""
 
+    def respond(self, status, payload):
+        # Fixture-only diagnostics: no URLs, identities, keys, or payloads.
+        print(f"Fixture HTTP method={self.command} status={status}", flush=True)
+        return super().respond(status, payload)
+
     def dispatch(self):
         original = self.path
         prefix = "/fuckin-locked"

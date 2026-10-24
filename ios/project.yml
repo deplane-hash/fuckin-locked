@@ -33,6 +33,7 @@ schemes:
     test:
       targets:
         - FuckinLockedTests
+        - FuckinLockedUITests
       environmentVariables:
         FL_RUN_RELAY_INTEGRATION: "1"
 targets:
@@ -59,3 +60,14 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.example.fuckinlocked.tests
+  FuckinLockedUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: FuckinLockedUITests
+    dependencies:
+      - target: FuckinLocked
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.example.fuckinlocked.uitests
+        TEST_TARGET_NAME: FuckinLocked

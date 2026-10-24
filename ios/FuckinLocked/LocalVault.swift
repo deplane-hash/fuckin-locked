@@ -87,9 +87,10 @@ struct ChatPayload: Codable {
     var processedEnvelopeIDs: Set<String> = []
     var pendingPeerBundle: RelayPrekeyBundle? = nil
     var composerLibrary: ComposerLibrary? = nil
+    var prekeyRequestID: UUID? = nil
 
     private enum CodingKeys: String, CodingKey {
-        case messages, signal, processedEnvelopeIDs, pendingPeerBundle, composerLibrary
+        case messages, signal, processedEnvelopeIDs, pendingPeerBundle, composerLibrary, prekeyRequestID
     }
 
     init(messages: [StoredMessage] = [], signal: SignalState? = nil,
@@ -118,6 +119,7 @@ struct ChatPayload: Codable {
         pendingPeerBundle = try values.decodeIfPresent(RelayPrekeyBundle.self,
                                                        forKey: .pendingPeerBundle)
         composerLibrary = try values.decodeIfPresent(ComposerLibrary.self, forKey: .composerLibrary)
+        prekeyRequestID = try values.decodeIfPresent(UUID.self, forKey: .prekeyRequestID)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -127,6 +129,7 @@ struct ChatPayload: Codable {
         try values.encode(processedEnvelopeIDs, forKey: .processedEnvelopeIDs)
         try values.encodeIfPresent(pendingPeerBundle, forKey: .pendingPeerBundle)
         try values.encodeIfPresent(composerLibrary, forKey: .composerLibrary)
+        try values.encodeIfPresent(prekeyRequestID, forKey: .prekeyRequestID)
     }
 }
 
@@ -487,6 +490,15 @@ struct DelayLedger: Codable {
     func pendingPeerBundle(for id: UUID) throws -> RelayPrekeyBundle? {
         guard unlockedChatID == id, let payload = chatPayload else { throw VaultError.corrupt }
         return payload.pendingPeerBundle
+    }
+
+    func prekeyRequestID(for id: UUID) throws -> UUID {
+        guard unlockedChatID == id, var payload = chatPayload else { throw VaultError.corrupt }
+        if let existing = payload.prekeyRequestID { return existing }
+        let requestID = UUID()
+        payload.prekeyRequestID = requestID
+        try commitChatPayload(payload, for: id)
+        return requestID
     }
 
     func clearPendingPeerBundle(for id: UUID) throws {

@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import PhotosUI
 import CryptoKit
+import LibSignalClient
 
 private enum Palette {
     static let background = Color(red: 16/255, green: 18/255, blue: 18/255)
@@ -75,6 +76,9 @@ private struct PrivateRootView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.userDidTakeScreenshotNotification)) { _ in
                 vault.lockChat()
+            }
+            .onChange(of: vault.unlockedChatID) { _, value in
+                if value == nil { messaging.clearTransientState() }
             }
     }
 }
@@ -304,6 +308,8 @@ private struct ComposeView: View {
     @State private var people: [Person] = []
     @State private var rooms: [RoomInfo] = []
     @State private var selection = ""
+    @State private var peerDevices: [RoomDevice] = []
+    @State private var peerDeviceID = ""
 
     private var availablePeople: [Person] {
         people.filter { $0.id != vault.indexedUserID }
@@ -345,6 +351,16 @@ private struct ComposeView: View {
                     .padding(14).background(Palette.surface, in: RoundedRectangle(cornerRadius: 16))
                 }
                 TextField("Name", text: $title).flField()
+                if isEncryptedSelection && !peerDevices.isEmpty {
+                    Picker("Friend's device", selection: $peerDeviceID) {
+                        Text("Select a device").tag("")
+                        ForEach(peerDevices, id: \.id) { device in
+                            Text(device.id).tag(device.id)
+                        }
+                    }.pickerStyle(.menu)
+                    Text("Check the device ID with your friend. Each device needs its own fingerprint verification.")
+                        .font(.footnote).foregroundStyle(Palette.muted)
+                }
                 if !isEncryptedSelection {
                     Toggle("Group", isOn: $group).tint(Palette.lime)
                 }
@@ -379,7 +395,7 @@ private struct ComposeView: View {
                                     throw MessagingError.invalidMessage
                                 }
                                 let devices = try await gateway.roomDevices(room)
-                                guard let peer = devices.first(where: { $0.user_id == peerID }) else {
+                                guard let peer = devices.first(where: { $0.user_id == peerID && $0.id == peerDeviceID }) else {
                                     throw ConnectionError.invalidResponse
                                 }
                                 try vault.createChat(title: peerName.isEmpty ? title : peerName, isGroup: false,
@@ -395,6 +411,7 @@ private struct ComposeView: View {
                         }
                     }
                 }
+                .disabled(isEncryptedSelection && peerDeviceID.isEmpty)
                 Spacer()
             }.padding(22).background(Palette.background).foregroundStyle(Palette.text)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() } } }
@@ -404,6 +421,21 @@ private struct ComposeView: View {
             try? await gateway.login(deviceID: vault.deviceID)
             people = (try? await gateway.people()) ?? []
             rooms = (try? await gateway.rooms()) ?? []
+        }
+        .task(id: selection) {
+            peerDevices = []; peerDeviceID = ""
+            let userID: String
+            if selection.hasPrefix("person:") {
+                userID = String(selection.dropFirst("person:".count))
+            } else if selection.hasPrefix("room:"),
+                      let item = oneToOneRooms.first(where: { $0.room.id == String(selection.dropFirst("room:".count)) }) {
+                userID = item.peer.id
+            } else { return }
+            do {
+                peerDevices = try await gateway.memberDevices(userID)
+                try Task.checkCancellation()
+                if peerDevices.count == 1 { peerDeviceID = peerDevices[0].id }
+            } catch { error = "Can't load approved devices" }
         }
         .onDisappear { title = ""; password = ""; selection = ""; rooms.removeAll(keepingCapacity: false) }
     }
@@ -454,6 +486,7 @@ private struct ConversationView: View {
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var viewedImage: Data?
     @State private var verified = false
+    @State private var identityMismatch = false
     @State private var status = ""
 
     var body: some View {
@@ -475,7 +508,7 @@ private struct ConversationView: View {
                 }.padding(16).background(Palette.surface, in: RoundedRectangle(cornerRadius: 16))
                     .padding(.horizontal)
             }
-            if !fingerprint.isEmpty && !verified {
+            if !fingerprint.isEmpty && !verified && !identityMismatch {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Verify this device before sending")
                         .font(.headline)
@@ -630,6 +663,14 @@ private struct ConversationView: View {
                         ownFingerprint = (try? messaging.ownFingerprint(for: id)) ?? ""
                         status = ""
                     }
+                } catch SignalError.untrustedIdentity {
+                    verified = false; identityMismatch = true
+                    status = "Device identity changed. Messaging stopped. Compare identities with your friend before starting a new verified chat."
+                    return
+                } catch SignalStoreError.identityChanged {
+                    verified = false; identityMismatch = true
+                    status = "Device identity changed. Messaging stopped."
+                    return
                 } catch MessagingError.localChatOnly {
                     status = "Local draft — delivery is not configured"
                     return
@@ -1124,6 +1165,7 @@ private struct DevicesView: View {
                         VStack(alignment: .leading) {
                             Text(device.id == vault.deviceID ? "This iPhone" : "Device")
                             Text(device.state).font(.footnote).foregroundStyle(Palette.muted)
+                            Text(device.id).font(.caption2.monospaced()).foregroundStyle(Palette.muted)
                         }
                         Spacer()
                         if device.state == "active" {
