@@ -11,6 +11,13 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Diagnose previous integration result
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 40129471328 --repo "$GITHUB_REPOSITORY" \
+            --name fuckin-locked-simulator-results --dir "$RUNNER_TEMP/previous.xcresult"
+          xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/previous.xcresult"
       - name: Toolchain
         run: |
           xcodebuild -version
@@ -61,6 +68,12 @@ jobs:
         with:
           name: fuckin-locked-simulator-results
           path: ${{ runner.temp }}/FuckinLockedTests.xcresult
+      - name: Report simulator failures
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/FuckinLockedTests.xcresult" ]; then
+            xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/FuckinLockedTests.xcresult"
+          fi
       - name: Stop local HTTPS relay integration fixture
         if: always()
         run: |

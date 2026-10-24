@@ -103,6 +103,70 @@ import LibSignalClient
         try restarted.unlockChat(try XCTUnwrap(restarted.chats.first?.id), password: "separate chat password")
     }
 
+    func testPasswordWrapperStaysCommittedAfterSubsequentIndexWrites() throws {
+        let root = folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = LocalVault(directory: root)
+        try vault.createAppPassword("old app password")
+        try vault.changeAppPassword(old: "old app password", new: "new app password")
+        try vault.createChat(title: "After replacement", isGroup: false, password: "separate chat password")
+        vault.lockApp()
+        let reopened = LocalVault(directory: root)
+        try reopened.unlock("new app password")
+        XCTAssertEqual(reopened.chats.first?.title, "After replacement")
+    }
+
+    func testInterruptedPasswordChangeDoesNotResurrectOldWrapper() throws {
+        let root = folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        var failDelayWrites = false
+        let vault = LocalVault(directory: root, beforeWrite: { url in
+            if failDelayWrites && url.lastPathComponent == "delay.bin" { throw VaultError.corrupt }
+        })
+        try vault.createAppPassword("old app password")
+        failDelayWrites = true
+        XCTAssertThrowsError(try vault.changeAppPassword(old: "old app password", new: "new app password"))
+        failDelayWrites = false
+        try vault.createChat(title: "After interruption", isGroup: false, password: "separate chat password")
+        vault.lockApp()
+        let reopened = LocalVault(directory: root)
+        try reopened.unlock("new app password")
+        XCTAssertEqual(reopened.chats.first?.title, "After interruption")
+    }
+
+    func testFailedAtomicVaultWritePreservesPreviousPassword() throws {
+        let root = folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        var failVaultWrites = false
+        let vault = LocalVault(directory: root, beforeWrite: { url in
+            if failVaultWrites && url.lastPathComponent == "vault.bin" { throw VaultError.corrupt }
+        })
+        try vault.createAppPassword("old app password")
+        failVaultWrites = true
+        XCTAssertThrowsError(try vault.changeAppPassword(old: "old app password", new: "new app password"))
+        vault.lockApp()
+        let reopened = LocalVault(directory: root)
+        try reopened.unlock("old app password")
+    }
+
+    func testStarterStickersAreBoundedImagesAndLibraryIsChatEncrypted() throws {
+        for sticker in StarterStickers.items { XCTAssertNoThrow(try PrivateImage.validate(sticker.imageData())) }
+        let root = folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = LocalVault(directory: root)
+        try vault.createAppPassword("correct app password")
+        try vault.createChat(title: "Friend", isGroup: false, password: "separate chat password")
+        let id = try XCTUnwrap(vault.chats.first?.id)
+        try vault.unlockChat(id, password: "separate chat password")
+        var library = ComposerLibrary()
+        library.favoriteStickers.insert("moon")
+        try vault.saveComposerLibrary(library, for: id)
+        vault.lockChat()
+        XCTAssertThrowsError(try vault.composerLibrary(for: id))
+        try vault.unlockChat(id, password: "separate chat password")
+        XCTAssertEqual(try vault.composerLibrary(for: id).favoriteStickers, ["moon"])
+    }
+
     func testVaultFileDoesNotContainNamesOrPasswords() throws {
         let root = folder()
         defer { try? FileManager.default.removeItem(at: root) }

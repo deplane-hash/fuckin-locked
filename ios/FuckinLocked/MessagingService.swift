@@ -10,6 +10,7 @@ enum MessagingError: Error {
     case unsupportedGroup
     case unexpectedSender
     case busy
+    case queued
 }
 
 @MainActor final class MessagingService: ObservableObject {
@@ -51,6 +52,7 @@ enum MessagingError: Error {
     private func login() async throws {
         guard !vault.deviceID.isEmpty else { throw MessagingError.unavailable }
         try await gateway.login(deviceID: vault.deviceID)
+        try await gateway.requireMessagingCapabilities()
     }
 
     private func localAddress() throws -> ProtocolAddress {
@@ -163,11 +165,9 @@ enum MessagingError: Error {
         let generation = vault.chatGeneration
         try check(id, generation: generation)
         let chat = try metadata(for: id)
-        try await login()
-        try check(id, generation: generation)
-        try await ensureLocalPrekeys(for: id, roomID: chat.roomID!)
-        try check(id, generation: generation)
-        let bundle = try await peerBundle(for: id, chat: chat, generation: generation)
+        guard let bundle = try vault.pendingPeerBundle(for: id) else {
+            throw MessagingError.unavailable
+        }
         guard try isPeerVerified(for: id) else {
             throw MessagingError.identityVerificationRequired(bundle.fingerprint)
         }
@@ -192,7 +192,13 @@ enum MessagingError: Error {
         try vault.commitChat(state: state, message: message, for: id)
         // Persist the exact wire bytes together with the advanced ratchet before
         // upload. Retries must reuse both these bytes and this stable ID.
-        try await flushOutbox(in: id, chat: chat, generation: generation)
+        do {
+            try await login()
+            try check(id, generation: generation)
+            try await flushOutbox(in: id, chat: chat, generation: generation)
+        } catch {
+            throw MessagingError.queued
+        }
     }
 
     func receive(in id: UUID) async throws {

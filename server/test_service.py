@@ -234,6 +234,15 @@ class RelayTests(unittest.TestCase):
         with self.assertRaises(service.Error):
             service.request_device(self.db, self.actor, pub(Ed25519PrivateKey.generate()))
 
+    def test_device_approval_expires_and_pending_device_cannot_authenticate(self):
+        pending = service.request_device(self.db, self.actor, pub(Ed25519PrivateKey.generate()))
+        with self.assertRaises(service.Error):
+            service.active_session(self.db, service.issue_session(self.db, pending))
+        self.db.execute("UPDATE devices SET created_at=? WHERE id=?", (int(time.time()) - 601, pending))
+        self.db.commit()
+        with self.assertRaises(service.Error):
+            service.approve_device(self.db, self.actor, pending)
+
     def test_delivery_ack_requires_active_recipient_and_is_single_use(self):
         code = service.create_invitation(self.db, self.actor["device_id"])
         friend = service.redeem_invitation(self.db, code, "Friend", "friend", pub(Ed25519PrivateKey.generate()))

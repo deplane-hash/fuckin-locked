@@ -28,6 +28,12 @@ struct Admission: Decodable {
     let state: String
 }
 struct BootstrapResult: Decodable { let user_id: String; let device_id: String }
+struct AccountProfile: Decodable {
+    let user_id: String
+    let device_id: String
+    let name: String
+    let username: String
+}
 
 struct Challenge: Decodable { let challenge: String }
 struct SessionToken: Decodable { let token: String }
@@ -195,6 +201,37 @@ struct RelayPrekeyBundle: Codable {
         guard token != nil else { throw ConnectionError.unavailable }
         let result: PeopleResponse = try await request("/v1/people")
         return result.people
+    }
+
+    func requireMessagingCapabilities() async throws {
+        let result: [String: [String]] = try await request("/v1/capabilities")
+        let required: Set<String> = ["idempotent_envelopes_v1", "delivery_status_v1", "room_inbox_v1"]
+        guard required.isSubset(of: Set(result["capabilities"] ?? [])) else {
+            throw ConnectionError.unavailable
+        }
+    }
+
+    func accountProfile() async throws -> AccountProfile {
+        try await request("/v1/me")
+    }
+
+    func requestDevice(publicKey: String) async throws -> String {
+        guard let key = Data(base64Encoded: publicKey), key.count == 32 else {
+            throw ConnectionError.invalidResponse
+        }
+        let result: [String: String] = try await request("/v1/devices/pending", method: "POST",
+                                                       body: ["public_key": publicKey])
+        guard let id = result["device_id"] else { throw ConnectionError.invalidResponse }
+        return try routeID(id)
+    }
+
+    func approveDevice(_ id: String) async throws {
+        let _: [String: String] = try await request("/v1/devices/\(try routeID(id))/approve",
+                                                    method: "POST", body: [:])
+    }
+
+    func pairingPublicKey() throws -> String {
+        try DeviceIdentity.getOrCreate(account: identityAccount).publicKey.rawRepresentation.base64EncodedString()
     }
 
     func pendingAdmissions() async throws -> [PendingAdmission] {

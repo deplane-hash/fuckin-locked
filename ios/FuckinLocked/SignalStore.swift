@@ -128,8 +128,8 @@ final class VaultSignalStore: IdentityKeyStore, PreKeyStore, SignedPreKeyStore,
 
     func currentPublicBundle(deviceNumber: UInt32 = 1) throws -> SignalPublicBundle {
         guard let oneTimeID = state.preKeys.keys.sorted().first,
-              let signedID = state.signedPreKeys.keys.sorted().first,
-              let kyberID = state.kyberPreKeys.keys.sorted().first else {
+              let signedID = state.signedPreKeys.keys.max(),
+              let kyberID = state.kyberPreKeys.keys.max() else {
             throw SignalStoreError.missingKey
         }
         let oneTime = try loadPreKey(id: oneTimeID, context: NullContext())

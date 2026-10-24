@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import PhotosUI
+import CryptoKit
 
 private enum Palette {
     static let background = Color(red: 16/255, green: 18/255, blue: 18/255)
@@ -14,9 +15,6 @@ private enum Palette {
     @StateObject private var vault: LocalVault
     @StateObject private var gateway: Gateway
     @StateObject private var messaging: MessagingService
-    @Environment(\.scenePhase) private var phase
-    @Environment(\.isSceneCaptured) private var captured
-    @State private var forceCover = false
 
     init() {
         let vault = LocalVault()
@@ -28,6 +26,23 @@ private enum Palette {
 
     var body: some Scene {
         WindowGroup {
+            PrivateRootView()
+                .environmentObject(vault)
+                .environmentObject(gateway)
+                .environmentObject(messaging)
+        }
+    }
+}
+
+private struct PrivateRootView: View {
+    @EnvironmentObject private var vault: LocalVault
+    @EnvironmentObject private var gateway: Gateway
+    @EnvironmentObject private var messaging: MessagingService
+    @Environment(\.scenePhase) private var phase
+    @Environment(\.isSceneCaptured) private var captured
+    @State private var forceCover = false
+
+    var body: some View {
             ZStack {
                 Palette.background.ignoresSafeArea()
                 if forceCover || phase != .active || captured {
@@ -40,9 +55,11 @@ private enum Palette {
                     MainView()
                 }
             }
-            .environmentObject(vault)
-            .environmentObject(gateway)
-            .environmentObject(messaging)
+            .background(NativePrivacyShield {
+                forceCover = true
+                gateway.disconnect()
+                vault.lockApp()
+            })
             .preferredColorScheme(.dark)
             .onChange(of: phase) { _, newPhase in
                 if newPhase != .active { gateway.disconnect(); vault.lockApp() }
@@ -59,7 +76,6 @@ private enum Palette {
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.userDidTakeScreenshotNotification)) { _ in
                 vault.lockChat()
             }
-        }
     }
 }
 
@@ -542,11 +558,14 @@ private struct ConversationView: View {
                             guard vault.chatGeneration == generation else { return }
                             fingerprint = value; verified = false; status = "Verify the device first"; draft = outgoing
                         }
+                        catch MessagingError.queued {
+                            guard vault.chatGeneration == generation else { return }
+                            status = "Saved. Waiting for a connection."
+                        }
                         catch {
                             guard vault.chatGeneration == generation else { return }
-                            // If saved in the encrypted outbox, it retries automatically;
-                            // restoring the draft here would encourage duplicate sends.
-                            status = "Can't connect. Saved messages retry while this chat is open."
+                            status = "Can't send this message"
+                            draft = outgoing
                         }
                     }
                 } label: { Image(systemName: "arrow.up.circle.fill") }
@@ -558,7 +577,12 @@ private struct ConversationView: View {
                 }.disabled(!verified || messaging.working).accessibilityLabel("Attach image")
             }.padding(14).background(Palette.surface, in: Capsule()).padding(.horizontal)
             if drawer {
-                StickerDrawer(insert: { draft += $0 }, close: { drawer = false })
+                StickerDrawer(id: id, insert: { draft += $0 }, sendSticker: { sticker in
+                    Task {
+                        do { try await messaging.sendImage(sticker.imageData(), in: id) }
+                        catch { status = "Sticker saved for retry or unavailable" }
+                    }
+                }, close: { drawer = false })
             }
         }
         .background(Palette.background).foregroundStyle(Palette.text)
@@ -592,6 +616,7 @@ private struct ConversationView: View {
         .sheet(isPresented: $showChangePassword) { ChangeChatPasswordView(id: id) }
         .task {
             let generation = vault.chatGeneration
+            verified = (try? messaging.isPeerVerified(for: id)) ?? false
             while !Task.isCancelled && vault.chatGeneration == generation && vault.unlockedChatID == id {
                 do {
                     if !messaging.working {
@@ -652,12 +677,17 @@ private struct ChangeChatPasswordView: View {
 }
 
 private struct StickerDrawer: View {
+    @EnvironmentObject var vault: LocalVault
+    @EnvironmentObject var messaging: MessagingService
+    let id: UUID
     let insert: (String) -> Void
+    let sendSticker: (StarterSticker) -> Void
     let close: () -> Void
     @State private var search = ""
-    @State private var recent: [String] = []
-    @State private var favorites: Set<String> = []
+    @State private var library = ComposerLibrary()
     @State private var selected = "All"
+    @State private var tab = "Stickers"
+    @State private var pack = "All packs"
     private let items = [
         ("🙂", "smile happy"), ("😄", "laugh happy"), ("💚", "green heart love"),
         ("✨", "sparkles stars"), ("🔥", "fire hot"), ("🙌", "hands celebrate"),
@@ -665,46 +695,98 @@ private struct StickerDrawer: View {
         ("🦊", "fox animal"), ("🪐", "planet space"), ("🍋", "lemon fruit")
     ]
     private var visible: [(String, String)] {
-        let source = selected == "Recent" ? recent.compactMap { value in items.first { $0.0 == value } } : items
+        let source = selected == "Recent" ? library.recentEmoji.compactMap { value in items.first { $0.0 == value } } : items
         return source.filter {
-            (selected != "Favorites" || favorites.contains($0.0)) &&
+            (selected != "Favorites" || library.favoriteEmoji.contains($0.0)) &&
             (search.isEmpty || $0.1.localizedCaseInsensitiveContains(search) || $0.0 == search)
+        }
+    }
+    private var stickers: [StarterSticker] {
+        let source = selected == "Recent" ? library.recentStickers.compactMap { key in
+            StarterStickers.items.first { $0.id == key }
+        } : StarterStickers.items
+        return source.filter {
+            (selected != "Favorites" || library.favoriteStickers.contains($0.id)) &&
+            (pack == "All packs" || pack == $0.pack) &&
+            (search.isEmpty || $0.title.localizedCaseInsensitiveContains(search))
         }
     }
     var body: some View {
         VStack(spacing: 12) {
             Capsule().fill(Palette.muted).frame(width: 36, height: 4)
             HStack {
-                Text("Emoji").font(.headline)
+                Text(tab).font(.headline)
                 Spacer()
                 Button("Close", action: close)
             }
             TextField("Search locally", text: $search).flField()
+            Picker("Content type", selection: $tab) {
+                Text("Stickers").tag("Stickers")
+                Text("Emoji").tag("Emoji")
+            }.pickerStyle(.segmented)
             Picker("Emoji collection", selection: $selected) {
                 ForEach(["All", "Recent", "Favorites"], id: \.self) { Text($0) }
             }.pickerStyle(.segmented)
+            if tab == "Stickers" {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack {
+                        ForEach(["All packs", "Energy", "Night"], id: \.self) { title in
+                            Button(title) { pack = title }
+                                .padding(10).foregroundStyle(pack == title ? Palette.lime : Palette.muted)
+                        }
+                    }
+                }
+            }
             ScrollView {
+                if tab == "Stickers" {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 12) {
+                        ForEach(stickers) { sticker in
+                            VStack {
+                                Button {
+                                    sendSticker(sticker)
+                                    library.recentStickers.removeAll { $0 == sticker.id }
+                                    library.recentStickers.insert(sticker.id, at: 0)
+                                } label: {
+                                    if let bytes = try? sticker.imageData(), let image = UIImage(data: bytes) {
+                                        Image(uiImage: image).resizable().scaledToFit().frame(height: 80)
+                                    }
+                                }.disabled(messaging.working).accessibilityLabel("Send \(sticker.title) sticker")
+                                Button {
+                                    if library.favoriteStickers.contains(sticker.id) { library.favoriteStickers.remove(sticker.id) }
+                                    else { library.favoriteStickers.insert(sticker.id) }
+                                } label: {
+                                    Image(systemName: library.favoriteStickers.contains(sticker.id) ? "star.fill" : "star")
+                                        .frame(minWidth: 44, minHeight: 44)
+                                }.accessibilityLabel("Favorite \(sticker.title)")
+                            }
+                        }
+                    }
+                } else {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
                     ForEach(visible, id: \.0) { item in
                         VStack(spacing: 0) {
                             Button {
                                 insert(item.0)
-                                recent.removeAll { $0 == item.0 }
-                                recent.insert(item.0, at: 0)
+                                library.recentEmoji.removeAll { $0 == item.0 }
+                                library.recentEmoji.insert(item.0, at: 0)
                             } label: { Text(item.0).font(.largeTitle).frame(minHeight: 48) }
                                 .accessibilityLabel("Insert \(item.1)")
                             Button {
-                                if favorites.contains(item.0) { favorites.remove(item.0) }
-                                else { favorites.insert(item.0) }
+                                if library.favoriteEmoji.contains(item.0) { library.favoriteEmoji.remove(item.0) }
+                                else { library.favoriteEmoji.insert(item.0) }
                             } label: {
-                                Image(systemName: favorites.contains(item.0) ? "star.fill" : "star")
+                                Image(systemName: library.favoriteEmoji.contains(item.0) ? "star.fill" : "star")
                                     .frame(minWidth: 44, minHeight: 44)
                             }.accessibilityLabel("Favorite \(item.1)")
                         }
                     }
                 }
+                }
             }.frame(maxHeight: 240)
         }.padding().background(Palette.surface, in: UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24))
+            .task { library = (try? vault.composerLibrary(for: id)) ?? ComposerLibrary() }
+            .onChange(of: library) { _, value in try? vault.saveComposerLibrary(value, for: id) }
+            .gesture(DragGesture(minimumDistance: 30).onEnded { if $0.translation.height > 60 { close() } })
     }
 }
 
@@ -786,6 +868,7 @@ private struct YouView: View {
     @State private var showDevices = false
     @State private var showEnrollment = false
     @State private var showBootstrap = false
+    @State private var showPairing = false
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
@@ -806,6 +889,7 @@ private struct YouView: View {
                     if vault.deviceID.isEmpty {
                         row("Use invitation", "envelope") { showEnrollment = true }
                         row("First device setup", "iphone.gen3") { showBootstrap = true }
+                        row("Link to my existing account", "link") { showPairing = true }
                     }
                 }.background(Palette.surface, in: RoundedRectangle(cornerRadius: 20))
             }.padding(22)
@@ -816,6 +900,7 @@ private struct YouView: View {
         .sheet(isPresented: $showDevices) { DevicesView() }
         .sheet(isPresented: $showEnrollment) { EnrollmentView() }
         .sheet(isPresented: $showBootstrap) { BootstrapView() }
+        .sheet(isPresented: $showPairing) { PairExistingDeviceView() }
     }
 
     private func row(_ title: String, _ symbol: String, action: @escaping () -> Void) -> some View {
@@ -926,11 +1011,110 @@ private struct BootstrapView: View {
     }
 }
 
+private struct PairExistingDeviceView: View {
+    @EnvironmentObject var gateway: Gateway
+    @EnvironmentObject var vault: LocalVault
+    @Environment(\.dismiss) var dismiss
+    @State private var publicKey = ""
+    @State private var deviceID = ""
+    @State private var status = ""
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("On your existing iPhone, open You → Authorized devices → Add device. Transfer this public pairing key through a trusted channel and compare it on both phones.")
+                    Text(publicKey).font(.body.monospaced()).textSelection(.enabled)
+                    Text("Public pairing key. Your private key stays on this iPhone.")
+                        .font(.footnote).foregroundStyle(Palette.muted)
+                    TextField("Device ID from your existing iPhone", text: $deviceID)
+                        .textInputAutocapitalization(.never).flField()
+                    Text("Approve the device on your existing iPhone before continuing. Old messages are not transferred.")
+                        .font(.footnote)
+                    if !status.isEmpty { Text(status).foregroundStyle(Palette.muted) }
+                    PrimaryButton(title: "Finish linking") {
+                        let generation = vault.chatGeneration
+                        Task {
+                            do {
+                                try await gateway.login(deviceID: deviceID.trimmingCharacters(in: .whitespacesAndNewlines))
+                                let profile = try await gateway.accountProfile()
+                                guard vault.chatGeneration == generation else { return }
+                                try vault.setProfile(name: profile.name, username: profile.username,
+                                    userID: profile.user_id, deviceID: profile.device_id)
+                                dismiss()
+                            } catch { status = "Device not approved or can't connect" }
+                        }
+                    }
+                }.padding(22)
+            }.background(Palette.background).foregroundStyle(Palette.text)
+                .navigationTitle("Link this iPhone")
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() } } }
+                .task { publicKey = (try? gateway.pairingPublicKey()) ?? "" }
+        }.onDisappear { publicKey = ""; deviceID = "" }
+    }
+}
+
+private struct ApproveNewDeviceView: View {
+    @EnvironmentObject var gateway: Gateway
+    @EnvironmentObject var vault: LocalVault
+    @Environment(\.dismiss) var dismiss
+    @State private var publicKey = ""
+    @State private var pendingID = ""
+    @State private var status = ""
+    @State private var busy = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Enter the public pairing key displayed by your new iPhone. Check the complete key on both screens before approving.")
+                    TextField("Public pairing key", text: $publicKey)
+                        .textInputAutocapitalization(.never).flField().disabled(!pendingID.isEmpty)
+                    if !pendingID.isEmpty {
+                        Text("Device ID").font(.headline)
+                        Text(pendingID).font(.body.monospaced()).textSelection(.enabled)
+                        Text("Enter this ID on the new iPhone. This approval expires after ten minutes. No message history or chat keys will be transferred.")
+                            .font(.footnote)
+                        PrimaryButton(title: "I compared the key — approve device") {
+                            busy = true
+                            Task {
+                                defer { busy = false }
+                                do {
+                                    try await gateway.approveDevice(pendingID)
+                                    status = "Approved. Finish linking on the new iPhone."
+                                    pendingID = ""
+                                    publicKey = ""
+                                } catch { status = "Approval unavailable or expired" }
+                            }
+                        }.disabled(busy)
+                    } else {
+                        PrimaryButton(title: "Create approval request") {
+                            busy = true
+                            Task {
+                                defer { busy = false }
+                                do {
+                                    try await gateway.login(deviceID: vault.deviceID)
+                                    publicKey = publicKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    pendingID = try await gateway.requestDevice(publicKey: publicKey)
+                                } catch { status = "Invalid pairing key or can't connect" }
+                            }
+                        }.disabled(busy)
+                    }
+                    if !status.isEmpty { Text(status).foregroundStyle(Palette.muted) }
+                }.padding(22)
+            }.background(Palette.background).foregroundStyle(Palette.text)
+                .navigationTitle("Add device")
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() } } }
+        }.onDisappear { publicKey = ""; pendingID = "" }
+    }
+}
+
 private struct DevicesView: View {
     @EnvironmentObject var gateway: Gateway
     @EnvironmentObject var vault: LocalVault
     @State private var devices: [DeviceInfo] = []
     @State private var error = ""
+    @State private var showAddDevice = false
     var body: some View {
         NavigationStack {
             List {
@@ -956,6 +1140,14 @@ private struct DevicesView: View {
                     }
                 }
             }.navigationTitle("Authorized devices")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Add device") { showAddDevice = true }
+                    }
+                }
+                .sheet(isPresented: $showAddDevice, onDismiss: {
+                    Task { devices = (try? await gateway.devices()) ?? [] }
+                }) { ApproveNewDeviceView() }
                 .task {
                     do { devices = try await gateway.devices() }
                     catch { self.error = "Can't connect" }

@@ -175,8 +175,9 @@ def approve_device(db: sqlite3.Connection, approver: sqlite3.Row, device_id: str
     try:
         require(db.execute("SELECT 1 FROM devices WHERE id=? AND state='active'",
                            (approver["device_id"],)).fetchone() is not None, 401, "Authentication required")
-        changed = db.execute("UPDATE devices SET state='active' WHERE id=? AND user_id=? AND state='pending'",
-                             (device_id, approver["user_id"])).rowcount
+        changed = db.execute("""UPDATE devices SET state='active' WHERE id=? AND user_id=?
+            AND state='pending' AND created_at>=?""",
+            (device_id, approver["user_id"], int(time.time()) - 600)).rowcount
         require(changed == 1, 404, "Pending device not found")
         db.commit()
     except Exception:
@@ -505,6 +506,12 @@ class Handler(BaseHTTPRequestHandler):
             if self.command == "POST" and path == "/v1/auth/session":
                 return {"token": verify_login(db, data["device_id"], data["challenge"], data["signature"])}
             actor = active_session(db, self.headers.get("Authorization", "").removeprefix("Bearer "))
+            if self.command == "GET" and path == "/v1/capabilities":
+                return {"capabilities": ["idempotent_envelopes_v1", "delivery_status_v1", "room_inbox_v1"]}
+            if self.command == "GET" and path == "/v1/me":
+                row = db.execute("SELECT name,username FROM users WHERE id=?", (actor["user_id"],)).fetchone()
+                return {"user_id": actor["user_id"], "device_id": actor["device_id"],
+                        "name": reveal(row["name"], "name"), "username": reveal(row["username"], "username")}
             if self.command == "POST" and path == "/v1/invitations":
                 return {"code": create_invitation(db, actor["device_id"], int(data.get("ttl", 86400)))}
             if self.command == "GET" and path == "/v1/admissions":

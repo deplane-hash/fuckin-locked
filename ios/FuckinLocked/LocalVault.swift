@@ -86,9 +86,10 @@ struct ChatPayload: Codable {
     var signal: SignalState? = nil
     var processedEnvelopeIDs: Set<String> = []
     var pendingPeerBundle: RelayPrekeyBundle? = nil
+    var composerLibrary: ComposerLibrary? = nil
 
     private enum CodingKeys: String, CodingKey {
-        case messages, signal, processedEnvelopeIDs, pendingPeerBundle
+        case messages, signal, processedEnvelopeIDs, pendingPeerBundle, composerLibrary
     }
 
     init(messages: [StoredMessage] = [], signal: SignalState? = nil,
@@ -116,6 +117,7 @@ struct ChatPayload: Codable {
                                                           forKey: .processedEnvelopeIDs) ?? []
         pendingPeerBundle = try values.decodeIfPresent(RelayPrekeyBundle.self,
                                                        forKey: .pendingPeerBundle)
+        composerLibrary = try values.decodeIfPresent(ComposerLibrary.self, forKey: .composerLibrary)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -124,6 +126,7 @@ struct ChatPayload: Codable {
         try values.encodeIfPresent(signal, forKey: .signal)
         try values.encode(processedEnvelopeIDs, forKey: .processedEnvelopeIDs)
         try values.encodeIfPresent(pendingPeerBundle, forKey: .pendingPeerBundle)
+        try values.encodeIfPresent(composerLibrary, forKey: .composerLibrary)
     }
 }
 
@@ -177,6 +180,7 @@ struct DelayLedger: Codable {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private let storageFolder: URL
+    private let beforeWrite: ((URL) throws -> Void)?
 
     private var folder: URL { storageFolder }
     private var vaultURL: URL { folder.appendingPathComponent("vault.bin") }
@@ -184,7 +188,8 @@ struct DelayLedger: Codable {
 
     var indexedUserID: String { index.userID }
 
-    init(directory: URL? = nil) {
+    init(directory: URL? = nil, beforeWrite: ((URL) throws -> Void)? = nil) {
+        self.beforeWrite = beforeWrite
         storageFolder = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Private", isDirectory: true)
         isConfigured = FileManager.default.fileExists(atPath: vaultURL.path)
@@ -234,6 +239,7 @@ struct DelayLedger: Codable {
 
     private func write(_ data: Data, to url: URL) throws {
         try prepareDirectory()
+        try beforeWrite?(url)
         try data.write(to: url, options: [.atomic, .completeFileProtection])
         // The enclosing directory is excluded before the atomic replacement.
         // Failure to set the per-file hint must not make the caller believe the write was rolled back.
@@ -384,6 +390,13 @@ struct DelayLedger: Codable {
                     remoteUserID: String?, remoteDeviceID: String?) throws {
         guard isUnlocked, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VaultError.corrupt }
         guard password.count >= 12 else { throw VaultError.passwordTooShort }
+        // Two independent local identities for one room/device would conflict
+        // with the relay's immutable identity binding.
+        if let roomID {
+            guard !isGroup, !index.chats.contains(where: { $0.roomID == roomID }) else {
+                throw VaultError.corrupt
+            }
+        }
         let raw = try random(32)
         let salt = try random(16)
         var candidate = index
@@ -525,6 +538,17 @@ struct DelayLedger: Codable {
         return chatPayload?.signal
     }
 
+    func composerLibrary(for id: UUID) throws -> ComposerLibrary {
+        guard isUnlocked, unlockedChatID == id, let chatPayload else { throw VaultError.corrupt }
+        return chatPayload.composerLibrary ?? ComposerLibrary()
+    }
+
+    func saveComposerLibrary(_ library: ComposerLibrary, for id: UUID) throws {
+        guard isUnlocked, unlockedChatID == id, var payload = chatPayload else { throw VaultError.corrupt }
+        payload.composerLibrary = library
+        try commitChatPayload(payload, for: id)
+    }
+
     func saveSignalState(_ state: SignalState, for id: UUID) throws {
         guard isUnlocked, unlockedChatID == id, chatKey != nil,
               var payload = chatPayload else { throw VaultError.corrupt }
@@ -554,8 +578,8 @@ struct DelayLedger: Codable {
         candidate.chats[position].salt = salt
         candidate.chats[position].wrappedKey = try seal(raw, key: derive(new, salt: salt))
         try save(candidate)
-        try resetChatDelay(id)
         lockChat()
+        try resetChatDelay(id)
     }
 
     func lockChat() {
