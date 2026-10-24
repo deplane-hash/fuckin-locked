@@ -85,13 +85,28 @@ struct RelayPrekeyBundle: Codable {
     private var base: URL? {
         guard let value = Bundle.main.object(forInfoDictionaryKey: "FLGatewayURL") as? String,
               let url = URL(string: value), url.scheme == "https",
-              let host = url.host, host != "REPLACE_WITH_GATEWAY_HOST" else { return nil }
+              let host = url.host, host != "REPLACE_WITH_GATEWAY_HOST",
+              url.query == nil, url.fragment == nil, url.user == nil, url.password == nil,
+              url.pathComponents.allSatisfy({ $0 != "." && $0 != ".." }) else { return nil }
         return url
+    }
+
+    // Keep any configured path prefix (for example /fuckin-locked/) when
+    // constructing service endpoints. URL(string:relativeTo:) treats a
+    // leading slash as an origin-root path and would bypass that prefix.
+    private func endpoint(_ path: String) -> URL? {
+        guard let base, path.hasPrefix("/") else { return nil }
+        let prefix = base.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        var components = URLComponents(url: base, resolvingAgainstBaseURL: false)
+        components?.path = "/" + ([prefix, path.trimmingCharacters(in: "/")]
+            .filter { !$0.isEmpty }
+            .joined(separator: "/"))
+        return components?.url
     }
 
     private func request<T: Decodable>(_ path: String, method: String = "GET", body: [String: Any]? = nil) async throws -> T {
         let started = generation
-        guard let base, let url = URL(string: path, relativeTo: base) else { throw ConnectionError.unavailable }
+        guard let url = endpoint(path) else { throw ConnectionError.unavailable }
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -126,7 +141,7 @@ struct RelayPrekeyBundle: Codable {
     func bootstrap(token: String, name: String, username: String) async throws -> BootstrapResult {
         let started = generation
         let key = try DeviceIdentity.getOrCreate()
-        guard let base, let url = URL(string: "/v1/bootstrap", relativeTo: base) else {
+        guard let url = endpoint("/v1/bootstrap") else {
             throw ConnectionError.unavailable
         }
         var request = URLRequest(url: url)

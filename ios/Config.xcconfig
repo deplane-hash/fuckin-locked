@@ -1,2 +1,3 @@
-// Replace with the public HTTPS gateway hostname before building.
-FL_GATEWAY_URL = https:/$()/REPLACE_WITH_GATEWAY_HOST
+// The app-level relay route is on the existing FreedomHub HTTPS origin.
+// There is no direct-relay fallback if this route is unavailable.
+FL_GATEWAY_URL = https:/$()/freedomhub.at/fuckin-locked/
