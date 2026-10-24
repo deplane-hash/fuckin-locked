@@ -29,7 +29,7 @@ The relay binds **127.0.0.1:8787**. For an iPhone build, expose it only through 
 
 ### iPhone app
 
-On macOS with Xcode 16+, XcodeGen, and CocoaPods:
+On macOS with Xcode 26+, XcodeGen, and CocoaPods (required by the pinned libsignal release):
 
 ```sh
 cd ios

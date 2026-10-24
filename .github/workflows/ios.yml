@@ -7,7 +7,7 @@ on:
 
 jobs:
   ios:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -27,6 +27,6 @@ jobs:
           xcodebuild test \
             -workspace FuckinLocked.xcworkspace \
             -scheme FuckinLocked \
-            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' \
             CODE_SIGNING_ALLOWED=NO \
             -quiet
