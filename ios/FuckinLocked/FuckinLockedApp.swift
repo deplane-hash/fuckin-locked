@@ -480,7 +480,7 @@ private struct ConversationView: View {
                                     .background(message.isOutgoing ? Palette.lime : Palette.surface,
                                                 in: RoundedRectangle(cornerRadius: 16))
                                 if message.isOutgoing {
-                                    Text(message.delivery == .delivered ? "Delivered" : "Sending")
+                                    Text(message.delivery == .delivered ? "Sent" : "Sending")
                                         .font(.caption2).foregroundStyle(Palette.muted)
                                 }
                             }
