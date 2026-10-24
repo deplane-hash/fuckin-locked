@@ -109,7 +109,7 @@ struct RelayPrekeyBundle: Codable {
         guard let base, path.hasPrefix("/") else { return nil }
         let prefix = base.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         var components = URLComponents(url: base, resolvingAgainstBaseURL: false)
-        components?.path = "/" + ([prefix, path.trimmingCharacters(in: "/")]
+        components?.path = "/" + ([prefix, path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))]
             .filter { !$0.isEmpty }
             .joined(separator: "/"))
         return components?.url
