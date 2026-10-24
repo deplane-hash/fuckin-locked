@@ -154,6 +154,9 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(fetched["identity_key"], bundle["identity_key"])
         with self.assertRaises(service.Error):
             service.take_prekeys(self.db, self.actor, room, friend["device_id"])
+        service.publish_prekeys(self.db, friend_actor, room, bundle)
+        with self.assertRaises(service.Error):
+            service.take_prekeys(self.db, self.actor, room, friend["device_id"])
         with self.assertRaises(service.Error):
             service.publish_prekeys(self.db, friend_actor, room, sample_bundle())
         service.publish_prekeys(self.db, friend_actor, room, sample_bundle(base64.b64decode(bundle["identity_key"])))

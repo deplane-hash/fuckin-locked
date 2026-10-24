@@ -332,7 +332,9 @@ def publish_prekeys(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, pa
             signed_prekey_signature=excluded.signed_prekey_signature,
             one_time_prekey_id=excluded.one_time_prekey_id, one_time_prekey=excluded.one_time_prekey,
             kyber_prekey_id=excluded.kyber_prekey_id, kyber_prekey=excluded.kyber_prekey,
-            kyber_prekey_signature=excluded.kyber_prekey_signature,consumed_at=NULL""",
+            kyber_prekey_signature=excluded.kyber_prekey_signature,
+            consumed_at=CASE WHEN prekey_bundles.one_time_prekey_id=excluded.one_time_prekey_id
+                THEN prekey_bundles.consumed_at ELSE NULL END""",
             (room_id, actor["device_id"], registration_id, device_number, fields[0], ids[0], fields[1],
              fields[2], ids[1], fields[3], ids[2], fields[4], fields[5]))
         db.commit()
