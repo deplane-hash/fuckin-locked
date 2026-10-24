@@ -668,6 +668,13 @@ private struct ConversationView: View {
         .sheet(isPresented: $showChangePassword) { ChangeChatPasswordView(id: id) }
         .task {
             let generation = vault.chatGeneration
+            // Local drafts never enter the relay or libsignal path. Surface
+            // that boundary immediately instead of waiting for a network
+            // operation to report localChatOnly.
+            if let chat = try? vault.chatMetadata(for: id), chat.roomID == nil {
+                status = "Local draft — delivery is not configured"
+                return
+            }
             verified = (try? messaging.isPeerVerified(for: id)) ?? false
             while !Task.isCancelled && vault.chatGeneration == generation && vault.unlockedChatID == id {
                 do {
