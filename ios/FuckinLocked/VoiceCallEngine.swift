@@ -164,7 +164,7 @@ enum VoiceCallError: Error {
     }
 
     private func createOffer(_ constraints: RTCMediaConstraints) async throws -> RTCSessionDescription {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<RTCSessionDescription, Error>) in
             peerConnection.offer(for: constraints) { description, error in
                 if let description { continuation.resume(returning: description) }
                 else { continuation.resume(throwing: error ?? VoiceCallError.protocolError) }
@@ -173,7 +173,7 @@ enum VoiceCallError: Error {
     }
 
     private func createAnswer(_ constraints: RTCMediaConstraints) async throws -> RTCSessionDescription {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<RTCSessionDescription, Error>) in
             peerConnection.answer(for: constraints) { description, error in
                 if let description { continuation.resume(returning: description) }
                 else { continuation.resume(throwing: error ?? VoiceCallError.protocolError) }
@@ -182,7 +182,7 @@ enum VoiceCallError: Error {
     }
 
     private func setLocal(_ description: RTCSessionDescription) async throws {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             peerConnection.setLocalDescription(description) { error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume() }
@@ -191,7 +191,7 @@ enum VoiceCallError: Error {
     }
 
     private func setRemote(_ description: RTCSessionDescription) async throws {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             peerConnection.setRemoteDescription(description) { error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume() }

@@ -40,6 +40,25 @@ def metadata_key() -> bytes:
     return key
 
 
+def turn_configuration() -> dict[str, str]:
+    """Return a complete TURN-over-TLS config or fail closed.
+
+    Calls never advertise a partially configured or non-TLS relay. Credentials
+    are deployment-provided short-lived values and are not written to logs or
+    the database.
+    """
+    url = os.environ.get("FL_TURN_URL", "")
+    username = os.environ.get("FL_TURN_USERNAME", "")
+    credential = os.environ.get("FL_TURN_CREDENTIAL", "")
+    # TURN URIs use the `turns:host:port` form, which Python's URL parser
+    # treats as an opaque path unless an authority prefix is supplied.
+    authority = url[6:].split("?", 1)[0] if url.lower().startswith("turns:") else ""
+    parsed = urlparse("//" + authority)
+    require(url.lower().startswith("turns:") and parsed.hostname and username and credential,
+            503, "Calls unavailable")
+    return {"url": url, "username": username, "credential": credential}
+
+
 def protect(value: str, field: str) -> bytes:
     nonce = os.urandom(12)
     return nonce + AESGCM(metadata_key()).encrypt(nonce, value.encode(), field.encode())
@@ -644,15 +663,15 @@ class Handler(BaseHTTPRequestHandler):
             actor = active_session(db, self.headers.get("Authorization", "").removeprefix("Bearer "))
             if self.command == "GET" and path == "/v1/capabilities":
                 capabilities = ["idempotent_envelopes_v1", "delivery_status_v1", "room_inbox_v1", "idempotent_prekeys_v1", "fixed_groups_v1"]
-                if os.environ.get("FL_TURN_URL") and os.environ.get("FL_TURN_USERNAME") and os.environ.get("FL_TURN_CREDENTIAL"):
+                try:
+                    turn_configuration()
+                except Error:
+                    pass
+                else:
                     capabilities.append("encrypted_calls_v1")
                 return {"capabilities": capabilities}
             if self.command == "GET" and path == "/v1/calls/turn":
-                url = os.environ.get("FL_TURN_URL", "")
-                username = os.environ.get("FL_TURN_USERNAME", "")
-                credential = os.environ.get("FL_TURN_CREDENTIAL", "")
-                require(url.startswith("turns:") and username and credential, 503, "Calls unavailable")
-                return {"url": url, "username": username, "credential": credential}
+                return turn_configuration()
             if self.command == "POST" and path == "/v1/groups":
                 return {"room_id": create_group(db, actor, data["peer_devices"])}
             if self.command == "GET" and len(parts) == 3 and parts[:2] == ["v1", "groups"]:

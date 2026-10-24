@@ -344,8 +344,11 @@ struct RelayPrekeyBundle: Codable {
         // Voice media must use the same operator-controlled route as service
         // traffic. Reject a deployment that tries to hand the client an
         // unrelated TURN host instead of silently creating a second route.
+        let authority = turn.url.lowercased().hasPrefix("turns:")
+            ? String(turn.url.dropFirst(6)).split(separator: "?", maxSplits: 1).first.map(String.init)
+            : nil
+        let turnHost = authority.flatMap { URL(string: "https://\($0)")?.host }
         guard let expectedHost = base?.host,
-              let turnHost = URL(string: turn.url)?.host,
               turnHost == expectedHost else { throw ConnectionError.unavailable }
         return turn
     }

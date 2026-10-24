@@ -124,6 +124,13 @@ class RelayTests(unittest.TestCase):
                 self.assertNotIn("encrypted_calls_v1", request("/v1/capabilities")[1]["capabilities"])
                 self.assertEqual(request("/v1/calls/turn")[0], 503)
                 self.assertEqual(request("/v1/calls/turn", authenticated=False)[0], 401)
+            with patch.dict(os.environ, {"FL_TURN_URL": "turns:freedomhub.at:5349?transport=tcp",
+                                         "FL_TURN_USERNAME": "short-lived-user",
+                                         "FL_TURN_CREDENTIAL": "short-lived-credential"}):
+                self.assertIn("encrypted_calls_v1", request("/v1/capabilities")[1]["capabilities"])
+                status, turn = request("/v1/calls/turn")
+                self.assertEqual(status, 200)
+                self.assertEqual(turn["url"], "turns:freedomhub.at:5349?transport=tcp")
             self.assertEqual(request(f"/v1/rooms/{room}/prekeys/{friend['device_id']}/request-one")[0], 200)
             status, result = request("/v1/envelopes", "POST", {
                 "room_id": room, "recipient_device": friend["device_id"], "kind": "message",

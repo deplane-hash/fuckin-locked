@@ -43,6 +43,7 @@ import LibSignalClient
         XCTAssertThrowsError(try CallSignal(callID: UUID(), kind: "stun", body: Data()).validate())
         XCTAssertThrowsError(try MessageContent(id: UUID(), text: "not empty", callSignal: signal).validate())
         XCTAssertThrowsError(try MessageContent(id: UUID(), text: "", image: Data([1]), callSignal: signal).validate())
+        XCTAssertThrowsError(try MessageContent(id: UUID(), text: "", groupID: "group", callSignal: signal).validate())
         XCTAssertThrowsError(try CallSignal(callID: UUID(), kind: "ice",
                                             body: Data(repeating: 0, count: CallSignal.maxBytes + 1)).validate())
     }
