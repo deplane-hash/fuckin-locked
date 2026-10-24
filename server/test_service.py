@@ -157,9 +157,15 @@ class RelayTests(unittest.TestCase):
         service.publish_prekeys(self.db, friend_actor, room, bundle)
         with self.assertRaises(service.Error):
             service.take_prekeys(self.db, self.actor, room, friend["device_id"])
+        changed_same_id = dict(bundle)
+        changed_same_id["one_time_prekey"] = base64.b64encode(os.urandom(33)).decode()
+        with self.assertRaises(service.Error):
+            service.publish_prekeys(self.db, friend_actor, room, changed_same_id)
         with self.assertRaises(service.Error):
             service.publish_prekeys(self.db, friend_actor, room, sample_bundle())
-        service.publish_prekeys(self.db, friend_actor, room, sample_bundle(base64.b64decode(bundle["identity_key"])))
+        replacement = sample_bundle(base64.b64decode(bundle["identity_key"]))
+        replacement.update({"signed_prekey_id": 13, "one_time_prekey_id": 14, "kyber_prekey_id": 15})
+        service.publish_prekeys(self.db, friend_actor, room, replacement)
         service.revoke_device(self.db, friend_actor, friend["device_id"])
         with self.assertRaises(service.Error):
             service.take_prekeys(self.db, self.actor, room, friend["device_id"])

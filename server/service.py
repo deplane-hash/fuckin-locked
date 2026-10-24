@@ -342,11 +342,15 @@ def publish_prekeys(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, pa
         require(_room_device_authorized(db, room_id, actor["device_id"]), 403, "Not authorized")
         count = db.execute("SELECT COUNT(*) FROM members WHERE room_id=?", (room_id,)).fetchone()[0]
         require(count == 2, 403, "One-to-one room required")
-        old = db.execute("SELECT identity_key,registration_id,device_number FROM prekey_bundles WHERE room_id=? AND device_id=?",
+        old = db.execute("""SELECT identity_key,registration_id,device_number,
+            one_time_prekey_id,one_time_prekey FROM prekey_bundles
+            WHERE room_id=? AND device_id=?""",
                          (room_id, actor["device_id"])).fetchone()
         if old is not None:
             require(old["identity_key"] == fields[0] and old["registration_id"] == registration_id and
                     old["device_number"] == device_number, 409, "Identity changed")
+            if old["one_time_prekey_id"] == ids[1]:
+                require(old["one_time_prekey"] == fields[3], 409, "One-time prekey changed")
         db.execute("""INSERT INTO prekey_bundles VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)
             ON CONFLICT(room_id,device_id) DO UPDATE SET
             signed_prekey_id=excluded.signed_prekey_id, signed_prekey=excluded.signed_prekey,
