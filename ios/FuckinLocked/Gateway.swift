@@ -78,12 +78,23 @@ struct RelayPrekeyBundle: Codable {
 
 @MainActor final class Gateway: ObservableObject {
     @Published private(set) var connected = false
+    private let baseOverride: URL?
+    private let identityAccount: String
     private var token: String?
     private var generation = 0
     private var session = makeGatewaySession()
 
+    init(baseURL: URL? = nil, session: URLSession? = nil,
+         identityAccount: String = DeviceIdentity.defaultAccount) {
+        baseOverride = baseURL
+        self.identityAccount = identityAccount
+        if let session { self.session = session }
+    }
+
     private var base: URL? {
-        guard let value = Bundle.main.object(forInfoDictionaryKey: "FLGatewayURL") as? String,
+        let configured = baseOverride?.absoluteString
+            ?? (Bundle.main.object(forInfoDictionaryKey: "FLGatewayURL") as? String)
+        guard let value = configured,
               let url = URL(string: value), url.scheme == "https",
               let host = url.host, host != "REPLACE_WITH_GATEWAY_HOST",
               url.query == nil, url.fragment == nil, url.user == nil, url.password == nil,
@@ -130,7 +141,7 @@ struct RelayPrekeyBundle: Codable {
     }
 
     func enroll(code: String, name: String, username: String) async throws -> Admission {
-        let key = try DeviceIdentity.getOrCreate()
+        let key = try DeviceIdentity.getOrCreate(account: identityAccount)
         let result: Admission = try await request("/v1/admissions", method: "POST", body: [
             "code": code, "name": name, "username": username,
             "public_key": key.publicKey.rawRepresentation.base64EncodedString()
@@ -140,7 +151,7 @@ struct RelayPrekeyBundle: Codable {
 
     func bootstrap(token: String, name: String, username: String) async throws -> BootstrapResult {
         let started = generation
-        let key = try DeviceIdentity.getOrCreate()
+        let key = try DeviceIdentity.getOrCreate(account: identityAccount)
         guard let url = endpoint("/v1/bootstrap") else {
             throw ConnectionError.unavailable
         }
@@ -168,7 +179,7 @@ struct RelayPrekeyBundle: Codable {
     func login(deviceID: String) async throws {
         let started = generation
         guard !deviceID.isEmpty else { throw ConnectionError.unavailable }
-        let key = try DeviceIdentity.load()
+        let key = try DeviceIdentity.load(account: identityAccount)
         let challenge: Challenge = try await request("/v1/auth/challenge", method: "POST", body: ["device_id": deviceID])
         let input = Data("fuckin-locked-login-v1:\(deviceID):\(challenge.challenge)".utf8)
         let signature = try key.signature(for: input)
@@ -299,16 +310,17 @@ struct RelayPrekeyBundle: Codable {
 }
 
 enum DeviceIdentity {
-    private static let account = "device-signing-key"
+    static let defaultAccount = "device-signing-key"
 
-    static func getOrCreate() throws -> Curve25519.Signing.PrivateKey {
-        if let existing = try? load() { return existing }
+    static func getOrCreate(account: String = defaultAccount) throws -> Curve25519.Signing.PrivateKey {
+        if let existing = try? load(account: account) { return existing }
         let created = Curve25519.Signing.PrivateKey()
-        try save(created)
+        try save(created, account: account)
         return created
     }
 
-    static func save(_ key: Curve25519.Signing.PrivateKey) throws {
+    static func save(_ key: Curve25519.Signing.PrivateKey,
+                     account: String = defaultAccount) throws {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "org.example.fuckinlocked",
             kSecAttrAccount as String: account]
@@ -318,7 +330,7 @@ enum DeviceIdentity {
         guard SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess else { throw ConnectionError.unavailable }
     }
 
-    static func load() throws -> Curve25519.Signing.PrivateKey {
+    static func load(account: String = defaultAccount) throws -> Curve25519.Signing.PrivateKey {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "org.example.fuckinlocked",
             kSecAttrAccount as String: account,
