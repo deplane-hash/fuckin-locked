@@ -246,6 +246,23 @@ class RelayTests(unittest.TestCase):
         with self.assertRaises(service.Error):
             service.take_prekeys(self.db, second_actor, room, first["device_id"])
 
+    def test_room_listing_includes_only_rooms_for_authenticated_member(self):
+        code = service.create_invitation(self.db, self.actor["device_id"])
+        friend = service.redeem_invitation(self.db, code, "Friend", "friend", pub(Ed25519PrivateKey.generate()))
+        service.approve_admission(self.db, self.actor, friend["admission_id"])
+        room = service.create_room(self.db, self.actor, [friend["user_id"]])
+        listed = service.list_rooms(self.db, self.actor)
+        self.assertEqual([item["id"] for item in listed], [room])
+        self.assertEqual({member["username"] for member in listed[0]["members"]}, {"owner", "friend"})
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM members WHERE room_id=?", (room,)).fetchone()[0], 2)
+
+        outsider_code = service.create_invitation(self.db, self.actor["device_id"])
+        outsider = service.redeem_invitation(self.db, outsider_code, "Outsider", "outsider",
+                                             pub(Ed25519PrivateKey.generate()))
+        service.approve_admission(self.db, self.actor, outsider["admission_id"])
+        outsider_actor = service.active_session(self.db, service.issue_session(self.db, outsider["device_id"]))
+        self.assertEqual(service.list_rooms(self.db, outsider_actor), [])
+
 
 if __name__ == "__main__":
     unittest.main()

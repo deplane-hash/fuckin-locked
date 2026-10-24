@@ -242,6 +242,27 @@ def create_room(db: sqlite3.Connection, actor: sqlite3.Row, user_ids: list[str])
     return room_id
 
 
+def list_rooms(db: sqlite3.Connection, actor: sqlite3.Row) -> list[dict]:
+    """Return only rooms for the current active user, with active members."""
+    require(db.execute("SELECT 1 FROM devices WHERE id=? AND user_id=? AND state='active'",
+                       (actor["device_id"], actor["user_id"])).fetchone() is not None,
+            401, "Authentication required")
+    rows = db.execute("""SELECT r.id FROM rooms r JOIN members m ON m.room_id=r.id
+        WHERE m.user_id=? ORDER BY r.created_at,r.id""", (actor["user_id"],)).fetchall()
+    rooms = []
+    for room in rows:
+        members = db.execute("""SELECT u.id,u.name,u.username FROM users u
+            JOIN members m ON m.user_id=u.id
+            WHERE m.room_id=? AND EXISTS (SELECT 1 FROM devices d
+              WHERE d.user_id=u.id AND d.state='active') ORDER BY u.id""",
+            (room["id"],)).fetchall()
+        rooms.append({"id": room["id"], "members": [{
+            "id": member["id"], "name": reveal(member["name"], "name"),
+            "username": reveal(member["username"], "username")
+        } for member in members]})
+    return rooms
+
+
 def send_envelope(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, recipient: str,
                   kind: str, ciphertext_b64: str) -> str:
     require(kind in ("message", "attachment", "key_update"))
@@ -482,9 +503,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.command == "POST" and path == "/v1/rooms":
                 return {"room_id": create_room(db, actor, data["user_ids"])}
             if self.command == "GET" and path == "/v1/rooms":
-                rows = db.execute("SELECT r.id FROM rooms r JOIN members m ON m.room_id=r.id WHERE m.user_id=?",
-                                  (actor["user_id"],)).fetchall()
-                return {"rooms": [row["id"] for row in rows]}
+                return {"rooms": list_rooms(db, actor)}
             parts = path.strip("/").split("/")
             if len(parts) == 4 and parts[:2] == ["v1", "rooms"] and parts[3] == "devices" and self.command == "GET":
                 room_id = parts[2]

@@ -357,13 +357,13 @@ struct DelayLedger: Codable {
             try failedAppAttempt()
             throw VaultError.invalidPassword
         }
-        var ledger = try loadDelay()
-        ledger.app = DelayRecord()
-        try saveDelay(ledger)
         let salt = try random(16)
         let changed = VaultHeader(salt: salt, wrappedKey: try seal(raw, key: derive(new, salt: salt)),
                                   encryptedIndex: record.encryptedIndex)
         try write(encoder.encode(changed), to: vaultURL)
+        var ledger = try loadDelay()
+        ledger.app = DelayRecord()
+        try saveDelay(ledger)
         header = changed
     }
 
@@ -504,8 +504,7 @@ struct DelayLedger: Codable {
     }
 
     func saveSignalState(_ state: SignalState, for id: UUID) throws {
-        guard isUnlocked, unlockedChatID == id, let chatKey,
-              let position = index.chats.firstIndex(where: { $0.id == id }),
+        guard isUnlocked, unlockedChatID == id, chatKey != nil,
               var payload = chatPayload else { throw VaultError.corrupt }
         payload.signal = state
         try commitChatPayload(payload, for: id)
@@ -524,12 +523,12 @@ struct DelayLedger: Codable {
             try failedChatAttempt(id)
             throw VaultError.invalidPassword
         }
-        try resetChatDelay(id)
         let salt = try random(16)
         var candidate = index
         candidate.chats[position].salt = salt
         candidate.chats[position].wrappedKey = try seal(raw, key: derive(new, salt: salt))
         try save(candidate)
+        try resetChatDelay(id)
         lockChat()
     }
 

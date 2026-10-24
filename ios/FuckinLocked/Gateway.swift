@@ -41,6 +41,16 @@ struct DevicesResponse: Decodable { let devices: [DeviceInfo] }
 struct RoomCreated: Decodable { let room_id: String }
 struct RoomDevice: Decodable { let id: String; let user_id: String }
 struct RoomDevices: Decodable { let devices: [RoomDevice] }
+struct RoomMember: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let username: String
+}
+struct RoomInfo: Decodable, Identifiable {
+    let id: String
+    let members: [RoomMember]
+}
+struct RoomsResponse: Decodable { let rooms: [RoomInfo] }
 struct RelayEnvelope: Codable {
     let id: String
     let room_id: String
@@ -51,7 +61,7 @@ struct RelayEnvelope: Codable {
     let created_at: Int
 }
 struct RelayEnvelopes: Decodable { let envelopes: [RelayEnvelope] }
-struct RelayPrekeyBundle: Decodable {
+struct RelayPrekeyBundle: Codable {
     let device_id: String
     let registration_id: UInt32
     let device_number: UInt32
@@ -204,6 +214,15 @@ struct RelayPrekeyBundle: Decodable {
         let result: RoomCreated = try await request("/v1/rooms", method: "POST",
                                                      body: ["user_ids": [user]])
         return try routeID(result.room_id)
+    }
+
+    func rooms() async throws -> [RoomInfo] {
+        guard token != nil else { throw ConnectionError.unavailable }
+        let result: RoomsResponse = try await request("/v1/rooms")
+        return result.rooms.compactMap { room in
+            guard (try? routeID(room.id)) != nil else { return nil }
+            return room
+        }
     }
 
     func roomDevices(_ roomID: String) async throws -> [RoomDevice] {

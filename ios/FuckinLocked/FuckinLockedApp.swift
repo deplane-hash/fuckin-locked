@@ -271,6 +271,12 @@ private struct ChatsView: View {
 }
 
 private struct ComposeView: View {
+    private struct JoinableRoom: Identifiable {
+        let room: RoomInfo
+        let peer: RoomMember
+        var id: String { room.id }
+    }
+
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var vault: LocalVault
     @EnvironmentObject var gateway: Gateway
@@ -279,26 +285,42 @@ private struct ComposeView: View {
     @State private var group = false
     @State private var error = ""
     @State private var people: [Person] = []
-    @State private var selectedPersonID = ""
+    @State private var rooms: [RoomInfo] = []
+    @State private var selection = ""
 
     private var availablePeople: [Person] {
         people.filter { $0.id != vault.indexedUserID }
     }
 
+    private var oneToOneRooms: [JoinableRoom] {
+        rooms.compactMap { room in
+            let peers = room.members.filter { $0.id != vault.indexedUserID }
+            guard room.members.count == 2, let peer = peers.first else { return nil }
+            return JoinableRoom(room: room, peer: peer)
+        }
+    }
+
+    private var isEncryptedSelection: Bool {
+        selection.hasPrefix("person:") || selection.hasPrefix("room:")
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 14) {
-                Text(selectedPersonID.isEmpty ? "Local draft chat" : "Encrypted one-to-one")
+                Text(isEncryptedSelection ? "Encrypted one-to-one" : "Local draft chat")
                     .font(.headline)
-                Text(selectedPersonID.isEmpty
-                     ? "A local draft is stored only on this device."
-                     : "Messages use an end-to-end encrypted session after device verification.")
+                Text(isEncryptedSelection
+                     ? "Messages use an end-to-end encrypted session after device verification."
+                     : "A local draft is stored only on this device.")
                     .font(.footnote).foregroundStyle(Palette.muted)
-                if !availablePeople.isEmpty {
-                    Picker("Friend", selection: $selectedPersonID) {
+                if !availablePeople.isEmpty || !oneToOneRooms.isEmpty {
+                    Picker("Conversation", selection: $selection) {
                         Text("Local draft").tag("")
                         ForEach(availablePeople) { person in
-                            Text("\(person.name) · @\(person.username)").tag(person.id)
+                            Text("New · \(person.name) · @\(person.username)").tag("person:\(person.id)")
+                        }
+                        ForEach(oneToOneRooms) { item in
+                            Text("Continue · \(item.peer.name)").tag("room:\(item.room.id)")
                         }
                     }
                     .pickerStyle(.menu)
@@ -306,34 +328,53 @@ private struct ComposeView: View {
                     .padding(14).background(Palette.surface, in: RoundedRectangle(cornerRadius: 16))
                 }
                 TextField("Name", text: $title).flField()
-                if selectedPersonID.isEmpty {
+                if !isEncryptedSelection {
                     Toggle("Group", isOn: $group).tint(Palette.lime)
                 }
                 SecureField("Separate chat password", text: $password).flField()
                 if !error.isEmpty { Text(error).foregroundStyle(.red) }
-                PrimaryButton(title: selectedPersonID.isEmpty ? "Create locked draft" : "Create encrypted chat") {
+                PrimaryButton(title: isEncryptedSelection ? "Add encrypted chat" : "Create locked draft") {
                     Task {
                         do {
-                            if selectedPersonID.isEmpty {
+                            if selection.isEmpty {
                                 try vault.createChat(title: title, isGroup: group, password: password)
                             } else {
                                 try await gateway.login(deviceID: vault.deviceID)
-                                let room = try await gateway.createOneToOneRoom(with: selectedPersonID)
+                                let room: String
+                                let peerID: String
+                                let peerName: String
+                                if selection.hasPrefix("person:") {
+                                    peerID = String(selection.dropFirst("person:".count))
+                                    room = try await gateway.createOneToOneRoom(with: peerID)
+                                    guard let peer = availablePeople.first(where: { $0.id == peerID }) else {
+                                        throw ConnectionError.invalidResponse
+                                    }
+                                    peerName = peer.name
+                                } else {
+                                    room = String(selection.dropFirst("room:".count))
+                                    guard let item = oneToOneRooms.first(where: { $0.room.id == room }) else {
+                                        throw ConnectionError.invalidResponse
+                                    }
+                                    peerID = item.peer.id
+                                    peerName = item.peer.name
+                                }
+                                guard !vault.chats.contains(where: { $0.roomID == room }) else {
+                                    throw MessagingError.invalidMessage
+                                }
                                 let devices = try await gateway.roomDevices(room)
-                                guard let peer = devices.first(where: { $0.user_id == selectedPersonID }) else {
+                                guard let peer = devices.first(where: { $0.user_id == peerID }) else {
                                     throw ConnectionError.invalidResponse
                                 }
-                                let person = availablePeople.first(where: { $0.id == selectedPersonID })
-                                try vault.createChat(title: person?.name ?? title, isGroup: false,
+                                try vault.createChat(title: peerName.isEmpty ? title : peerName, isGroup: false,
                                                      password: password, roomID: room,
-                                                     remoteUserID: selectedPersonID,
+                                                     remoteUserID: peerID,
                                                      remoteDeviceID: peer.id)
                             }
                             dismiss()
                         } catch {
-                            self.error = selectedPersonID.isEmpty
+                            self.error = selection.isEmpty
                                 ? "Enter a name and a password of at least 12 characters"
-                                : "Can't connect or create this chat"
+                                : (error is MessagingError ? "This room is already on this device" : "Can't connect or create this chat")
                         }
                     }
                 }
@@ -345,8 +386,9 @@ private struct ComposeView: View {
             guard !vault.deviceID.isEmpty else { return }
             try? await gateway.login(deviceID: vault.deviceID)
             people = (try? await gateway.people()) ?? []
+            rooms = (try? await gateway.rooms()) ?? []
         }
-        .onDisappear { title = ""; password = "" }
+        .onDisappear { title = ""; password = ""; selection = ""; rooms.removeAll(keepingCapacity: false) }
     }
 }
 

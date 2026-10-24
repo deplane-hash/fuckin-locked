@@ -7,6 +7,7 @@ enum MessagingError: Error {
     case identityVerificationRequired(String)
     case invalidMessage
     case unsupportedGroup
+    case unexpectedSender
 }
 
 @MainActor final class MessagingService: ObservableObject {
@@ -155,6 +156,13 @@ enum MessagingError: Error {
         }
         let envelopes = try await gateway.pendingEnvelopes().filter { $0.room_id == chat.roomID }
         for envelope in envelopes {
+            guard envelope.sender_device == chat.remoteDeviceID,
+                  envelope.sender_user_id == chat.remoteUserID else {
+                // Do not feed a ciphertext from an unbound device into this chat's
+                // Signal address. A new device needs a separately approved chat
+                // binding rather than silently sharing this session.
+                throw MessagingError.unexpectedSender
+            }
             if try vault.hasProcessedEnvelope(envelope.id, for: id) {
                 try await gateway.acknowledgeEnvelope(envelope.id)
                 continue
