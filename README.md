@@ -1,14 +1,14 @@
 # fuckin locked — implementation preview
 
-This repository contains a native iPhone app source project and a runnable ciphertext relay. **It is not a working secure messenger yet.** The app deliberately disables message sending, attachments, and calls until an independently reviewed end-to-end protocol integration is implemented and tested. The local password vault and the service's invitation/device controls are implemented; their iOS behavior has not been device-tested in this environment.
+This repository contains a native iPhone app source project and a runnable ciphertext relay. **It is not production-ready or independently reviewed.** The app now has a one-to-one Signal/libsignal message path, encrypted protocol-state persistence, explicit identity-fingerprint verification, and a recipient-scoped opaque-envelope relay. The local password vault and the service's invitation/device controls are implemented; signed-device, gateway, and two-client checks still require the supplied macOS workflow and real deployment details.
 
 ## What runs
 
-- `ios/`: SwiftUI iPhone app for iOS 18+, generated with XcodeGen. App password, per-chat passwords, encrypted local draft vault, immediate relock hooks, read-only privacy page, invitation enrollment, first-device bootstrap, member listing, invitations, and device listing/revocation.
+- `ios/`: SwiftUI iPhone app for iOS 18+, generated with XcodeGen. App password, per-chat passwords, encrypted local vault, immediate relock hooks, read-only privacy page, invitation enrollment, first-device bootstrap, member/room listing, invitations, device listing/revocation, libsignal one-to-one sessions, fingerprint verification, and opaque-envelope delivery.
 - `server/`: Python 3.11+ standard-library HTTP service with `cryptography` for Ed25519 verification. It stores only opaque envelope bytes; it has no decryption endpoint or content key. Admission uses a single-use expiring invitation followed by active-member approval. A new device must have its public key submitted by an authenticated existing device and then explicitly approved.
 - `deploy/`: deployment templates. Nothing has been deployed.
 
-The compose screen creates an explicitly labeled **local draft chat**. The conversation screen says messaging is unavailable and has no send action. It does not simulate successful encrypted delivery.
+The compose screen can create an explicitly labeled **local draft chat** or attach a local chat to a discovered one-to-one room. A network chat only enables sending after the peer's identity fingerprint is compared out-of-band and approved. Local drafts remain local and are never presented as delivered messages.
 
 ## Setup
 
@@ -50,7 +50,7 @@ cd server
 python3 -m unittest -v
 ```
 
-On macOS after `xcodegen generate`, run the `FuckinLockedTests` scheme in Xcode. Those tests cover app/chat relock, persistent delays, and app password rewrapping. They are supplied but **not run here** because this environment has no Swift, Xcode, or iOS simulator.
+On macOS after `xcodegen generate`, run the `FuckinLockedTests` scheme in Xcode. The repository workflow targets Xcode 26 on a macOS runner and runs the app, vault, and libsignal round-trip tests on an iPhone 17 simulator. This Linux workspace cannot run Xcode locally; simulator results are recorded in `docs/verification.md`. Signed-device lifecycle, capture, backup, accessibility, and gateway checks still need to be run on real iPhones.
 
 ## Key hierarchy and local protection
 
@@ -64,9 +64,9 @@ The relay database stores names and usernames encrypted with AES-GCM under `FL_M
 
 Only the configured HTTPS gateway is used for app service requests. Gateway failure produces “Can't connect.” The gateway sees transport metadata and forwards opaque envelopes. End-to-end encryption must remain independent of it. There is no push integration yet. A future APNs integration must send only a generic wake notification such as “New message,” with no sender, group, message, or attachment content. Apple's system APNs connections cannot be routed through this app-level gateway.
 
-## Security work still required before real messaging
+## Security work still required before release
 
-1. Install and integrate the pinned [Signal libsignal](https://github.com/signalapp/libsignal) CocoaPod for one-to-one asynchronous sessions on iOS, with durable encrypted protocol state and prekey publication/consumption. Its remote Swift Package integration and third-party use are unsupported. Verify compilation, license obligations, and upgrades; see `docs/protocol-integration.md`.
+1. Complete two independently installed clients through the real HTTPS gateway, including offline delivery, restart, identity substitution, prekey exhaustion, replay, concurrent sends, revocation, and gateway failure. The current simulator test proves the libsignal stores and protocol round trip, not a live device-to-device deployment.
 2. Build group key management using a maintained protocol/library, with membership changes and device revocation causing new key epochs. Do not use an ad-hoc shared room key. Add device-key fingerprints, out-of-band identity verification, and an explicit stop-and-review flow for identity changes.
 3. Add encrypted attachment and thumbnail handling, no plaintext temporary files, authenticated chunking, internal media viewer, and encrypted sticker transport. The current emoji drawer is local UI only; GIFs and animated stickers are not implemented.
 4. Add approval/pairing UI, call signaling/media with an audited encrypted calling library, and all service traffic through the gateway. Calls have no active tab.
@@ -76,4 +76,4 @@ The app has no copy, share, drag, external forwarding, open-in, Photos save, or 
 
 ## Dependency and license notes
 
-The current iOS code uses Apple SwiftUI, UIKit, CryptoKit, CommonCrypto, and Security frameworks. The relay specifies `cryptography` 50.0.2 (Apache-2.0 OR BSD-3-Clause); local server tests ran against the preinstalled 41.0.7, so the pinned deployment version still needs a clean-install test. No sticker assets are bundled. `libsignal` is AGPL-3.0-only, currently maintained, and provides Swift bindings. It is pinned in `ios/Podfile`, but **has not been installed, compiled, or connected to message sending**. Its third-party support and license implications are documented in `docs/protocol-integration.md`. See `docs/threat-model.md` for limits.
+The current iOS code uses Apple SwiftUI, UIKit, CryptoKit, CommonCrypto, and Security frameworks. The relay specifies `cryptography` 50.0.2 (Apache-2.0 OR BSD-3-Clause); local server tests ran against the preinstalled 41.0.7, so the pinned deployment version still needs a clean-install test. No sticker assets are bundled. `libsignal` is AGPL-3.0-only, currently maintained, and provides Swift bindings. It is pinned in `ios/Podfile`, compiled by the macOS CI workflow, and used by the one-to-one protocol path. Its unsupported third-party status and license implications are documented in `docs/protocol-integration.md`; obtain legal review before distribution. See `docs/threat-model.md` for limits.

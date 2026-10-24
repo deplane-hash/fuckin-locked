@@ -833,7 +833,7 @@ private struct PrivacyView: View {
         "Messages stay hidden in lists and notifications. No notification reply actions are provided.",
         "Recording and mirroring hide the app when iOS reports capture. A screenshot can already exist when iOS tells the app about it.",
         "No export or attachment saving controls are provided. A recipient can still transcribe or photograph a screen.",
-        "For now, sending messages is unavailable. End-to-end encrypted sessions have not been integrated or verified.",
+        "One-to-one messages use the pinned libsignal protocol after you compare and approve the other device's fingerprint. This build is not independently reviewed, and live two-device gateway delivery still needs signed-device testing.",
         "The service can see membership, devices, delivery timing, and ciphertext sizes. It cannot decrypt ciphertext submitted to its relay.",
         "Losing a password or device key can make local history unrecoverable. There is no recovery key held by the service."
     ]

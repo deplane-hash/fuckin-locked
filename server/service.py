@@ -538,6 +538,11 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(exc.status, {"error": exc.message})
         except (KeyError, TypeError, ValueError, sqlite3.IntegrityError, json.JSONDecodeError):
             self.respond(400, {"error": "Invalid request"})
+        except Exception:
+            # Never send a traceback, database detail, or request data back to a
+            # client. The process manager can restart the service after logging
+            # is configured out of band; this handler intentionally stays quiet.
+            self.respond(500, {"error": "Service unavailable"})
 
 
 if __name__ == "__main__":
