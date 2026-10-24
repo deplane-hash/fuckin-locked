@@ -523,6 +523,12 @@ private struct ConversationView: View {
                 Button("Lock chat") { draft = ""; vault.lockChat() }
                     .foregroundStyle(Palette.lime)
             }.padding(.horizontal)
+            if let chat = try? vault.chatMetadata(for: id), chat.roomID == nil {
+                Text("Local draft — delivery is not configured")
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
+                    .accessibilityIdentifier("local-draft-status")
+            }
             if !ownFingerprint.isEmpty && !verified {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Your fingerprint").font(.headline)
