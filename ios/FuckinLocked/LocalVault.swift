@@ -519,6 +519,10 @@ struct DelayLedger: Codable {
         let raw: Data
         do {
             raw = try open(chat.wrappedKey, key: derive(old, salt: chat.salt))
+            // Validate the existing chat ciphertext before changing its wrapper.
+            // A corrupt payload must not be hidden behind a successful password
+            // change; the old wrapper remains the recoverable state.
+            _ = try open(chat.ciphertext, key: SymmetricKey(data: raw))
         } catch {
             try failedChatAttempt(id)
             throw VaultError.invalidPassword
