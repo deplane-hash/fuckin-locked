@@ -1,0 +1,32 @@
+name: iOS build and tests
+
+on:
+  push:
+    branches: [main, 'work/**']
+  workflow_dispatch:
+
+jobs:
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available
+          brew install xcodegen cocoapods
+      - name: Generate project and install libsignal
+        working-directory: ios
+        run: |
+          xcodegen generate
+          pod install
+      - name: Build and test on simulator
+        working-directory: ios
+        run: |
+          xcodebuild test \
+            -workspace FuckinLocked.xcworkspace \
+            -scheme FuckinLocked \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            CODE_SIGNING_ALLOWED=NO \
+            -quiet

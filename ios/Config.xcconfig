@@ -1,0 +1,2 @@
+// Replace with the public HTTPS gateway hostname before building.
+FL_GATEWAY_URL = https:/$()/REPLACE_WITH_GATEWAY_HOST

@@ -1,0 +1,51 @@
+name: FuckinLocked
+options:
+  bundleIdPrefix: org.example
+  deploymentTarget:
+    iOS: "18.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    TARGETED_DEVICE_FAMILY: "1"
+    GENERATE_INFOPLIST_FILE: YES
+    INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+    INFOPLIST_KEY_UILaunchScreen_Generation: YES
+    INFOPLIST_KEY_FLGatewayURL: "$(FL_GATEWAY_URL)"
+    INFOPLIST_KEY_UIFileSharingEnabled: NO
+    INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: NO
+    CODE_SIGN_STYLE: Automatic
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: NO
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_ENABLE_EXPLICIT_MODULES: NO
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited)"
+    GCC_PREPROCESSOR_DEFINITIONS: "$(inherited)"
+    INFOPLIST_KEY_UIRequiresFullScreen: YES
+configFiles:
+  Debug: Config.xcconfig
+  Release: Config.xcconfig
+targets:
+  FuckinLocked:
+    type: application
+    platform: iOS
+    scheme:
+      testTargets:
+        - FuckinLockedTests
+    sources:
+      - path: FuckinLocked
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.example.fuckinlocked
+        INFOPLIST_KEY_CFBundleDisplayName: "Fuckin Locked"
+        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: NO
+  FuckinLockedTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: FuckinLockedTests
+    dependencies:
+      - target: FuckinLocked
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.example.fuckinlocked.tests

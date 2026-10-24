@@ -1,0 +1,20 @@
+[Unit]
+Description=Fuckin Locked ciphertext relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=REPLACE_WITH_SERVICE_USER
+WorkingDirectory=/opt/fuckin-locked/server
+EnvironmentFile=/etc/fuckin-locked/relay.env
+ExecStart=/opt/fuckin-locked/venv/bin/python /opt/fuckin-locked/server/service.py
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/fuckin-locked
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
