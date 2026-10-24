@@ -23,6 +23,17 @@
   The next revision uses ad-hoc simulator signing with explicit simulator-only
   Keychain entitlements and reports safe OSStatus codes. Device builds do not use
   the simulator entitlement file. This correction still requires a successful run.
+- Run `40132216165` validates that correction: **the two-client HTTPS/libsignal
+  integration test passed**, including invitation → approval → device binding →
+  both password gates → text/reaction/image delivery → offline queue reopening →
+  additional-device approval → session revocation and no silent forwarding.
+  All 18 non-UI cases passed; the one lifecycle UI case failed an assertion in
+  that run. Earlier unsigned simulator run `40131445830` passed that UI case.
+  The test is now isolated, time bounded and given descriptive assertion messages;
+  its exact prior source location is being extracted before a beta is verified.
+- A restricted native composer and third-party keyboard policy have been added
+  to close default Copy/Cut/drag/Writing Tools paths. Their new tests require the
+  next Xcode run. Public pairing keys remain selectable by design.
 - Added source/tests: persisted encrypted outbox; distinct Sent/Delivered states;
   images/reactions; original stickers and encrypted preferences; explicit device
   linking; synchronous native inactive cover; scene-local capture observation;

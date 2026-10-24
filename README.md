@@ -22,7 +22,7 @@ pod install
 open FuckinLocked.xcworkspace
 ```
 
-The app requires iOS 18+. `Config.xcconfig` targets `https://freedomhub.at/fuckin-locked/`. Set your signing team and a bundle identifier matching your provisioning profile. The repository's workflow can build an unsigned device IPA and optionally sign using protected repository secrets. An unsigned IPA needs valid signing before installation.
+The app requires iOS 18+. `Config.xcconfig` targets `https://freedomhub.at/fuckin-locked/`. Set your signing team and a bundle identifier matching your provisioning profile. Push builds produce an unsigned IPA after tests; manually dispatch with `sign_ipa` enabled to use protected repository secrets for Ad Hoc signing. An unsigned IPA needs valid signing before installation. Simulator tests use ad-hoc simulator signing and a simulator-only entitlement file to exercise the real Keychain without Apple signing credentials.
 
 All application service requests use the configured HTTPS gateway, with normal certificate validation and redirects refused. There is no direct fallback. Rotate TLS certificates by installing a CA-valid certificate for the same hostname, reloading the gateway, and verifying a signed-device connection. New hostnames/paths require an app configuration update. Never embed a server TLS private key in the app.
 
@@ -72,7 +72,7 @@ Image import uses the system Photos picker, resizes a still image to at most 102
 
 The drawer has functional **Stickers** and **Emoji** tabs, local search, pack shortcuts, Recent/Favorites and close/drag controls. Three original stickers are rendered by `StarterStickers.swift`; no user screenshot assets were imported. Preferences are chat-encrypted. See [the future import format](docs/sticker-format.md); pack import itself is unfinished.
 
-No chat copying, sharing, forwarding, external opening or attachment saving is provided. Public device-pairing identifiers can be selected; this does not expose messages. There are no analytics or third-party crash SDKs. The relay never logs request URLs, headers or bodies; CI fixture diagnostics contain method/status codes only. An authorized recipient can still transcribe or photograph a screen. A compromised OS, modified client, jailbroken device or malicious recipient is outside the official client's guarantees.
+No chat copying, sharing, forwarding, external opening or attachment saving is provided. The native composer allows paste but blocks export edit actions, dragging/dropping and Writing Tools; third-party keyboard extensions are disallowed. Public device-pairing identifiers can be selected; this does not expose messages. There are no analytics or third-party crash SDKs. The relay never logs request URLs, headers or bodies; CI fixture diagnostics contain method/status codes only. An authorized recipient can still transcribe or photograph a screen. A compromised OS, modified client, jailbroken device or malicious recipient is outside the official client's guarantees.
 
 No push integration exists yet. Future APNs payloads must be generic **New message** notices with no identity/content and no revealing actions. An ordinary app cannot route Apple's system APNs connections through this gateway.
 

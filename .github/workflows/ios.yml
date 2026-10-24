@@ -4,8 +4,24 @@ on:
   push:
     branches: [main, 'work/**']
   workflow_dispatch:
+    inputs:
+      sign_ipa:
+        description: "Sign an Ad Hoc IPA using repository secrets"
+        type: boolean
+        default: false
 
 jobs:
+  diagnose-lifecycle:
+    runs-on: macos-26
+    steps:
+      - name: Locate previous lifecycle failure
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 40132216165 --repo "$GITHUB_REPOSITORY" \
+            --name fuckin-locked-simulator-results --dir "$RUNNER_TEMP/previous.xcresult"
+          xcrun xcresulttool get object --legacy --format json --path "$RUNNER_TEMP/previous.xcresult" \
+            | jq '.issues.testFailureSummaries._values[] | {message: .message._value, location: .documentLocationInCreatingWorkspace.url._value}'
   ios:
     runs-on: macos-26
     timeout-minutes: 60
@@ -44,7 +60,8 @@ jobs:
           done
           cat "$RUNNER_TEMP/fuckin-locked-relay.log"
           exit 1
-      - name: Build and test on simulator
+      - name: Build and test protocol and vault on simulator
+        timeout-minutes: 12
         working-directory: ios
         run: |
           export FL_RUN_RELAY_INTEGRATION=1
@@ -54,20 +71,46 @@ jobs:
             -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' \
             -derivedDataPath "$RUNNER_TEMP/fuckin-locked-simulator-build" \
             -resultBundlePath "$RUNNER_TEMP/FuckinLockedTests.xcresult" \
+            -only-testing:FuckinLockedTests \
+            -test-timeouts-enabled YES \
+            -maximum-test-execution-time-allowance 300 \
             CODE_SIGNING_ALLOWED=YES \
             CODE_SIGN_IDENTITY=- \
             -quiet
+      - name: Verify simulator lifecycle
+        timeout-minutes: 10
+        working-directory: ios
+        run: |
+          xcodebuild test \
+            -workspace FuckinLocked.xcworkspace \
+            -scheme FuckinLockedRelayTests \
+            -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' \
+            -derivedDataPath "$RUNNER_TEMP/fuckin-locked-simulator-build" \
+            -resultBundlePath "$RUNNER_TEMP/FuckinLockedLifecycle.xcresult" \
+            -only-testing:FuckinLockedUITests \
+            -test-timeouts-enabled YES \
+            -maximum-test-execution-time-allowance 300 \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- -quiet
       - name: Upload simulator test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: fuckin-locked-simulator-results
           path: ${{ runner.temp }}/FuckinLockedTests.xcresult
+      - name: Upload lifecycle test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuckin-locked-lifecycle-results
+          path: ${{ runner.temp }}/FuckinLockedLifecycle.xcresult
       - name: Report simulator failures
         if: always()
         run: |
           if [ -d "$RUNNER_TEMP/FuckinLockedTests.xcresult" ]; then
             xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/FuckinLockedTests.xcresult"
+          fi
+          if [ -d "$RUNNER_TEMP/FuckinLockedLifecycle.xcresult" ]; then
+            xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/FuckinLockedLifecycle.xcresult"
           fi
           cat "$RUNNER_TEMP/fuckin-locked-relay.log"
           simulator_app="$RUNNER_TEMP/fuckin-locked-simulator-build/Build/Products/Debug-iphonesimulator/FuckinLocked.app"
@@ -89,6 +132,7 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             CONFIGURATION_BUILD_DIR="$build_dir" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             -quiet
@@ -104,6 +148,7 @@ jobs:
           path: ${{ runner.temp }}/fuckin-locked-unsigned.ipa
           if-no-files-found: error
       - name: Sign iPhone IPA with supplied Ad Hoc profile
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_ipa
         env:
           IOS_CERT_P12_B64: ${{ secrets.IOS_CERT_P12_B64 }}
           IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
@@ -149,6 +194,7 @@ jobs:
             CODE_SIGN_IDENTITY="$signing_identity" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             PRODUCT_BUNDLE_IDENTIFIER="$bundle_id" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             PROVISIONING_PROFILE_SPECIFIER="$profile_name" \
             CODE_SIGNING_ALLOWED=YES \
             CODE_SIGNING_REQUIRED=YES \
@@ -171,6 +217,7 @@ jobs:
             -exportOptionsPlist "$signing_dir/exportOptions.plist" \
             -quiet
       - name: Upload signed iPhone IPA artifact
+        if: github.event_name == 'workflow_dispatch' && inputs.sign_ipa
         uses: actions/upload-artifact@v4
         with:
           name: fuckin-locked-signed-ipa

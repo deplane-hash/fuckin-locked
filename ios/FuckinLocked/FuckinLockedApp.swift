@@ -13,6 +13,7 @@ private enum Palette {
 }
 
 @main struct FuckinLockedApp: App {
+    @UIApplicationDelegateAdaptor(KeyboardPolicyDelegate.self) private var applicationDelegate
     @StateObject private var vault: LocalVault
     @StateObject private var gateway: Gateway
     @StateObject private var messaging: MessagingService
@@ -582,8 +583,8 @@ private struct ConversationView: View {
             HStack(spacing: 12) {
                 Button { drawer.toggle() } label: { Image(systemName: "face.smiling") }
                     .accessibilityLabel("Stickers and emoji")
-                TextField("Message", text: $draft)
-                    .disabled(!verified)
+                PrivateMessageField(text: $draft, isEnabled: verified && !identityMismatch)
+                    .frame(minHeight: 44)
                 Button {
                     let outgoing = draft
                     let generation = vault.chatGeneration
