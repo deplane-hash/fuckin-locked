@@ -1,0 +1,85 @@
+name: iOS build and tests
+
+on:
+  push:
+    branches: [main, 'work/**']
+  workflow_dispatch:
+
+jobs:
+  ios:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available
+          brew install xcodegen cocoapods
+      - name: Generate project and install libsignal
+        working-directory: ios
+        run: |
+          xcodegen generate
+          pod install
+      - name: Start local HTTPS relay integration fixture
+        run: |
+          python3 -m venv "$RUNNER_TEMP/fuckin-locked-venv"
+          "$RUNNER_TEMP/fuckin-locked-venv/bin/pip" install --disable-pip-version-check -q -r server/requirements.txt
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -keyout "$RUNNER_TEMP/fuckin-locked-relay.key" \
+            -out "$RUNNER_TEMP/fuckin-locked-relay.crt" \
+            -subj '/CN=127.0.0.1' \
+            -addext 'subjectAltName=IP:127.0.0.1' >/dev/null 2>&1
+          export FL_DB="$RUNNER_TEMP/fuckin-locked-relay.sqlite3"
+          export FL_PORT=8787
+          export FL_BOOTSTRAP_TOKEN=ci-bootstrap-token
+          export FL_METADATA_KEY="$($RUNNER_TEMP/fuckin-locked-venv/bin/python -c 'import base64,os; print(base64.b64encode(os.urandom(32)).decode())')"
+          export FL_TEST_TLS_CERT="$RUNNER_TEMP/fuckin-locked-relay.crt"
+          export FL_TEST_TLS_KEY="$RUNNER_TEMP/fuckin-locked-relay.key"
+          "$RUNNER_TEMP/fuckin-locked-venv/bin/python" server/test_https.py >"$RUNNER_TEMP/fuckin-locked-relay.log" 2>&1 &
+          echo $! >"$RUNNER_TEMP/fuckin-locked-relay.pid"
+          for attempt in $(seq 1 30); do
+            if curl --silent --show-error --insecure --fail https://127.0.0.1:8787/fuckin-locked/health -o /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/fuckin-locked-relay.log"
+          exit 1
+      - name: Build and test on simulator
+        working-directory: ios
+        run: |
+          export FL_RUN_RELAY_INTEGRATION=1
+          xcodebuild test \
+            -workspace FuckinLocked.xcworkspace \
+            -scheme FuckinLocked \
+            -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' \
+            CODE_SIGNING_ALLOWED=NO \
+            -quiet
+      - name: Stop local HTTPS relay integration fixture
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/fuckin-locked-relay.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/fuckin-locked-relay.pid")" || true
+          fi
+      - name: Build unsigned iPhone IPA artifact
+        run: |
+          build_dir="$RUNNER_TEMP/fuckin-locked-iphone-build"
+          xcodebuild build \
+            -workspace ios/FuckinLocked.xcworkspace \
+            -scheme FuckinLocked \
+            -configuration Release \
+            -sdk iphoneos \
+            CONFIGURATION_BUILD_DIR="$build_dir" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            -quiet
+          mkdir -p "$RUNNER_TEMP/fuckin-locked-ipa/Payload"
+          cp -R "$build_dir/FuckinLocked.app" "$RUNNER_TEMP/fuckin-locked-ipa/Payload/"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$RUNNER_TEMP/fuckin-locked-ipa/Payload" \
+            "$RUNNER_TEMP/fuckin-locked-unsigned.ipa"
+      - name: Upload unsigned iPhone IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuckin-locked-unsigned-ipa
+          path: ${{ runner.temp }}/fuckin-locked-unsigned.ipa
+          if-no-files-found: error
