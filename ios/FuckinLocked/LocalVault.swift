@@ -45,6 +45,19 @@ struct StoredChat: Codable, Identifiable {
         remoteUserID = try values.decodeIfPresent(String.self, forKey: .remoteUserID)
         remoteDeviceID = try values.decodeIfPresent(String.self, forKey: .remoteDeviceID)
     }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(title, forKey: .title)
+        try values.encode(isGroup, forKey: .isGroup)
+        try values.encode(salt, forKey: .salt)
+        try values.encode(wrappedKey, forKey: .wrappedKey)
+        try values.encode(ciphertext, forKey: .ciphertext)
+        try values.encodeIfPresent(roomID, forKey: .roomID)
+        try values.encodeIfPresent(remoteUserID, forKey: .remoteUserID)
+        try values.encodeIfPresent(remoteDeviceID, forKey: .remoteDeviceID)
+    }
 }
 
 enum MessageDelivery: String, Codable {
@@ -98,6 +111,14 @@ struct ChatPayload: Codable {
                                                           forKey: .processedEnvelopeIDs) ?? []
         pendingPeerBundle = try values.decodeIfPresent(RelayPrekeyBundle.self,
                                                        forKey: .pendingPeerBundle)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(messages, forKey: .messages)
+        try values.encodeIfPresent(signal, forKey: .signal)
+        try values.encode(processedEnvelopeIDs, forKey: .processedEnvelopeIDs)
+        try values.encodeIfPresent(pendingPeerBundle, forKey: .pendingPeerBundle)
     }
 }
 
