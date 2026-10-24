@@ -34,6 +34,60 @@ def sample_bundle(identity=None):
 
 
 class RelayTests(unittest.TestCase):
+    def group_fixture(self):
+        friends = []
+        for username in ("groupbob", "groupcharlie"):
+            invitation = service.create_invitation(self.db, self.actor["device_id"])
+            member = service.redeem_invitation(self.db, invitation, username, username, pub(Ed25519PrivateKey.generate()))
+            service.approve_admission(self.db, self.actor, member["admission_id"])
+            actor = service.active_session(self.db, service.issue_session(self.db, member["device_id"]))
+            self.db.commit()
+            friends.append((member, actor))
+        group = service.create_group(self.db, self.actor, [friend[0]["device_id"] for friend in friends])
+        return group, friends
+
+    def test_group_transports_are_private_selected_device_scoped_and_idempotent(self):
+        group, ((bob, bob_actor), (charlie, charlie_actor)) = self.group_fixture()
+        link = service.group_link(self.db, self.actor, group, bob["device_id"])["room_id"]
+        self.assertEqual(service.group_link(self.db, bob_actor, group, self.actor["device_id"])["room_id"], link)
+        self.assertNotIn(link, [room["id"] for room in service.list_rooms(self.db, self.actor)])
+        self.assertTrue(next(room for room in service.list_rooms(self.db, self.actor) if room["id"] == group)["is_group"])
+        service.publish_prekeys(self.db, bob_actor, link, sample_bundle())
+        with self.assertRaises(service.Error):
+            service.take_prekeys(self.db, charlie_actor, link, bob["device_id"], "forbidden")
+        with self.assertRaises(service.Error):
+            service.send_envelope(self.db, self.actor, group, bob["device_id"], "message", base64.b64encode(os.urandom(96)).decode())
+        extra = service.request_device(self.db, bob_actor, pub(Ed25519PrivateKey.generate()))
+        service.approve_device(self.db, bob_actor, extra)
+        extra_actor = service.active_session(self.db, service.issue_session(self.db, extra))
+        self.db.commit()
+        with self.assertRaises(service.Error):
+            service.group_info(self.db, extra_actor, group)
+        self.assertNotIn(group, [room["id"] for room in service.list_rooms(self.db, extra_actor)])
+
+    def test_group_revocation_stops_all_old_group_links_and_prekey_claims(self):
+        group, ((bob, bob_actor), (charlie, charlie_actor)) = self.group_fixture()
+        ab = service.group_link(self.db, self.actor, group, bob["device_id"])["room_id"]
+        ac = service.group_link(self.db, self.actor, group, charlie["device_id"])["room_id"]
+        service.publish_prekeys(self.db, bob_actor, ab, sample_bundle())
+        service.take_prekeys(self.db, self.actor, ab, bob["device_id"], "original-claim")
+        service.revoke_device(self.db, bob_actor, bob["device_id"])
+        self.assertTrue(service.group_info(self.db, self.actor, group)["blocked"])
+        for room, target in ((ab, bob["device_id"]), (ac, charlie["device_id"])):
+            with self.assertRaises(service.Error):
+                service.send_envelope(self.db, self.actor, room, target, "message", base64.b64encode(os.urandom(96)).decode())
+        with self.assertRaises(service.Error):
+            service.take_prekeys(self.db, self.actor, ab, bob["device_id"], "original-claim")
+
+    def test_only_owner_can_remove_member_and_old_keys_are_not_reused(self):
+        group, ((bob, bob_actor), (charlie, charlie_actor)) = self.group_fixture()
+        with self.assertRaises(service.Error):
+            service.remove_group_member(self.db, bob_actor, group, charlie["user_id"])
+        service.remove_group_member(self.db, self.actor, group, charlie["user_id"])
+        self.assertTrue(service.group_info(self.db, self.actor, group)["blocked"])
+        with self.assertRaises(service.Error):
+            service.group_link(self.db, self.actor, group, bob["device_id"])
+
     def test_http_routes_enforce_auth_and_reach_messaging_handlers(self):
         code = service.create_invitation(self.db, self.actor["device_id"])
         friend = service.redeem_invitation(self.db, code, "Friend", "friend", pub(Ed25519PrivateKey.generate()))

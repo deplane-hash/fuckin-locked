@@ -11,11 +11,17 @@ struct MessageContent: Codable {
     var image: Data?
     var reactionTarget: UUID?
     var reaction: String?
+    var groupID: String? = nil
 
     static let reactions = ["💚", "👍", "😂", "😮", "😢", "🔥"]
 
     func validate() throws {
         guard version == 1, text.utf8.count <= 16_384 else { throw MessagingError.invalidMessage }
+        if let groupID {
+            guard !groupID.isEmpty, groupID.utf8.count <= 128,
+                  groupID.unicodeScalars.allSatisfy({ $0.value >= 0x21 && $0.value <= 0x7e })
+            else { throw MessagingError.invalidMessage }
+        }
         if let reactionTarget {
             guard reactionTarget != id, image == nil, text.isEmpty,
                   let reaction, Self.reactions.contains(reaction) else { throw MessagingError.invalidMessage }

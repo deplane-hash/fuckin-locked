@@ -79,6 +79,8 @@ struct StoredMessage: Codable, Identifiable, Equatable {
     var reactionTarget: UUID? = nil
     var reaction: String? = nil
     var reactions: [String: String]? = nil
+    var groupID: String? = nil
+    var senderDeviceID: String? = nil
 }
 
 struct ChatPayload: Codable {
@@ -88,9 +90,13 @@ struct ChatPayload: Codable {
     var pendingPeerBundle: RelayPrekeyBundle? = nil
     var composerLibrary: ComposerLibrary? = nil
     var prekeyRequestID: UUID? = nil
+    var groupBindings: [GroupTransport]? = nil
+    var groupOutbox: [MessageContent]? = nil
+    var groupRoster: [String]? = nil
 
     private enum CodingKeys: String, CodingKey {
         case messages, signal, processedEnvelopeIDs, pendingPeerBundle, composerLibrary, prekeyRequestID
+        case groupBindings, groupOutbox, groupRoster
     }
 
     init(messages: [StoredMessage] = [], signal: SignalState? = nil,
@@ -120,6 +126,9 @@ struct ChatPayload: Codable {
                                                        forKey: .pendingPeerBundle)
         composerLibrary = try values.decodeIfPresent(ComposerLibrary.self, forKey: .composerLibrary)
         prekeyRequestID = try values.decodeIfPresent(UUID.self, forKey: .prekeyRequestID)
+        groupBindings = try values.decodeIfPresent([GroupTransport].self, forKey: .groupBindings)
+        groupOutbox = try values.decodeIfPresent([MessageContent].self, forKey: .groupOutbox)
+        groupRoster = try values.decodeIfPresent([String].self, forKey: .groupRoster)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -130,6 +139,9 @@ struct ChatPayload: Codable {
         try values.encodeIfPresent(pendingPeerBundle, forKey: .pendingPeerBundle)
         try values.encodeIfPresent(composerLibrary, forKey: .composerLibrary)
         try values.encodeIfPresent(prekeyRequestID, forKey: .prekeyRequestID)
+        try values.encodeIfPresent(groupBindings, forKey: .groupBindings)
+        try values.encodeIfPresent(groupOutbox, forKey: .groupOutbox)
+        try values.encodeIfPresent(groupRoster, forKey: .groupRoster)
     }
 }
 
@@ -184,6 +196,15 @@ struct DelayLedger: Codable {
     private let decoder = JSONDecoder()
     private let storageFolder: URL
     private let beforeWrite: ((URL) throws -> Void)?
+    private var lockObservers: [UUID: () -> Void] = [:]
+
+    func observeChatLock(_ handler: @escaping () -> Void) -> UUID {
+        let id = UUID()
+        lockObservers[id] = handler
+        return id
+    }
+
+    func removeChatLockObserver(_ id: UUID) { lockObservers[id] = nil }
 
     private var folder: URL { storageFolder }
     private var vaultURL: URL { folder.appendingPathComponent("vault.bin") }
@@ -396,7 +417,7 @@ struct DelayLedger: Codable {
         // Two independent local identities for one room/device would conflict
         // with the relay's immutable identity binding.
         if let roomID {
-            guard !isGroup, !index.chats.contains(where: { $0.roomID == roomID }) else {
+            guard !index.chats.contains(where: { $0.roomID == roomID }) else {
                 throw VaultError.corrupt
             }
         }
@@ -555,6 +576,52 @@ struct DelayLedger: Codable {
         return chatPayload.composerLibrary ?? ComposerLibrary()
     }
 
+    func groupBindings(for id: UUID) throws -> [GroupTransport]? {
+        guard unlockedChatID == id, let chatPayload else { throw VaultError.corrupt }
+        return chatPayload.groupBindings
+    }
+
+    func pinGroupRoster(_ roster: [String], for id: UUID) throws {
+        guard unlockedChatID == id, var payload = chatPayload else { throw VaultError.corrupt }
+        let sorted = roster.sorted()
+        if let pinned = payload.groupRoster, pinned != sorted { throw GroupMessagingError.closed }
+        payload.groupRoster = sorted
+        try commitChatPayload(payload, for: id)
+    }
+
+    func saveGroupBindings(_ bindings: [GroupTransport], for id: UUID) throws {
+        guard unlockedChatID == id, var payload = chatPayload else { throw VaultError.corrupt }
+        payload.groupBindings = bindings
+        try commitChatPayload(payload, for: id)
+    }
+
+    func groupTransportDirectory(group id: UUID, transport: UUID) throws -> URL {
+        guard unlockedChatID == id else { throw VaultError.corrupt }
+        return folder.appendingPathComponent("GroupTransports", isDirectory: true)
+            .appendingPathComponent(id.uuidString, isDirectory: true)
+            .appendingPathComponent(transport.uuidString, isDirectory: true)
+    }
+
+    func groupOutbox(for id: UUID) throws -> [MessageContent] {
+        guard unlockedChatID == id, let chatPayload else { throw VaultError.corrupt }
+        return chatPayload.groupOutbox ?? []
+    }
+
+    func queueGroupContent(_ content: MessageContent, for id: UUID) throws {
+        guard unlockedChatID == id, var payload = chatPayload else { throw VaultError.corrupt }
+        var pending = payload.groupOutbox ?? []
+        guard pending.count < 100 else { throw MessagingError.unavailable }
+        pending.append(content)
+        payload.groupOutbox = pending
+        try commitChatPayload(payload, for: id)
+    }
+
+    func finishGroupFanout(_ messageID: UUID, for id: UUID) throws {
+        guard unlockedChatID == id, var payload = chatPayload else { throw VaultError.corrupt }
+        payload.groupOutbox?.removeAll { $0.id == messageID }
+        try commitChatPayload(payload, for: id)
+    }
+
     func saveComposerLibrary(_ library: ComposerLibrary, for id: UUID) throws {
         guard isUnlocked, unlockedChatID == id, var payload = chatPayload else { throw VaultError.corrupt }
         payload.composerLibrary = library
@@ -595,6 +662,7 @@ struct DelayLedger: Codable {
     }
 
     func lockChat() {
+        Array(lockObservers.values).forEach { $0() }
         chatGeneration &+= 1
         messages.removeAll(keepingCapacity: false)
         messageRecords.removeAll(keepingCapacity: false)

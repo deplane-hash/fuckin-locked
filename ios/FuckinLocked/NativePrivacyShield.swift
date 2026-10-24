@@ -60,6 +60,9 @@ struct NativePrivacyShield: UIViewRepresentable {
             MainActor.assumeIsolated {
                 self?.shield?.isHidden = true
                 self?.window?.rootViewController?.view.accessibilityElementsHidden = false
+                // An alert-level cover must not leave the hosting window
+                // without keyboard focus after returning to the password UI.
+                self?.window?.makeKey()
             }
         })
         if scene.activationState != .foregroundActive { conceal() }

@@ -92,6 +92,13 @@ def connect(path: str = DB_PATH) -> sqlite3.Connection:
       room_id TEXT NOT NULL, target_device TEXT NOT NULL, requester_device TEXT NOT NULL,
       request_id TEXT NOT NULL, bundle TEXT NOT NULL,
       PRIMARY KEY(room_id,target_device,requester_device,request_id));
+    CREATE TABLE IF NOT EXISTS private_groups(
+      room_id TEXT PRIMARY KEY REFERENCES rooms(id), owner_user_id TEXT NOT NULL,
+      roster TEXT NOT NULL, blocked INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE IF NOT EXISTS group_links(
+      room_id TEXT PRIMARY KEY REFERENCES rooms(id), group_id TEXT NOT NULL REFERENCES private_groups(room_id),
+      left_device TEXT NOT NULL, right_device TEXT NOT NULL,
+      UNIQUE(group_id,left_device,right_device));
     """)
     db.commit()
     return db
@@ -223,6 +230,9 @@ def revoke_device(db: sqlite3.Connection, actor: sqlite3.Row, device_id: str) ->
         db.execute("DELETE FROM envelopes WHERE recipient_device=? AND delivered_at IS NULL", (device_id,))
         db.execute("DELETE FROM prekey_bundles WHERE device_id=?", (device_id,))
         db.execute("DELETE FROM prekey_claims WHERE target_device=? OR requester_device=?", (device_id, device_id))
+        for group in db.execute("SELECT room_id,roster FROM private_groups").fetchall():
+            if device_id in json.loads(group["roster"]):
+                db.execute("UPDATE private_groups SET blocked=1 WHERE room_id=?", (group["room_id"],))
         db.commit()
     except Exception:
         db.rollback()
@@ -254,19 +264,109 @@ def list_rooms(db: sqlite3.Connection, actor: sqlite3.Row) -> list[dict]:
                        (actor["device_id"], actor["user_id"])).fetchone() is not None,
             401, "Authentication required")
     rows = db.execute("""SELECT r.id FROM rooms r JOIN members m ON m.room_id=r.id
-        WHERE m.user_id=? ORDER BY r.created_at,r.id""", (actor["user_id"],)).fetchall()
+        WHERE m.user_id=? AND NOT EXISTS(SELECT 1 FROM group_links l WHERE l.room_id=r.id)
+        ORDER BY r.created_at,r.id""", (actor["user_id"],)).fetchall()
     rooms = []
     for room in rows:
+        group = db.execute("SELECT roster FROM private_groups WHERE room_id=?", (room["id"],)).fetchone()
+        if group and actor["device_id"] not in json.loads(group["roster"]):
+            continue
         members = db.execute("""SELECT u.id,u.name,u.username FROM users u
             JOIN members m ON m.user_id=u.id
             WHERE m.room_id=? AND EXISTS (SELECT 1 FROM devices d
               WHERE d.user_id=u.id AND d.state='active') ORDER BY u.id""",
             (room["id"],)).fetchall()
-        rooms.append({"id": room["id"], "members": [{
+        rooms.append({"id": room["id"], "is_group": group is not None, "members": [{
             "id": member["id"], "name": reveal(member["name"], "name"),
             "username": reveal(member["username"], "username")
         } for member in members]})
     return rooms
+
+
+def create_group(db: sqlite3.Connection, actor: sqlite3.Row, peer_devices: list[str]) -> str:
+    require(isinstance(peer_devices, list) and 2 <= len(peer_devices) <= 7)
+    require(all(isinstance(value, str) for value in peer_devices))
+    roster = sorted(set(peer_devices + [actor["device_id"]]))
+    require(len(roster) == len(peer_devices) + 1, message="Select distinct devices")
+    group_id = secrets.token_urlsafe(16)
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        users = []
+        for device in roster:
+            row = db.execute("SELECT user_id FROM devices WHERE id=? AND state='active'", (device,)).fetchone()
+            require(row is not None, 403, "Device unavailable")
+            users.append(row["user_id"])
+        require(len(set(users)) == len(users), message="Select one device per member")
+        require(actor["user_id"] in users, 403, "Not authorized")
+        db.execute("INSERT INTO rooms VALUES(?,?,?)", (group_id, actor["device_id"], int(time.time())))
+        db.executemany("INSERT INTO members VALUES(?,?)", ((group_id, uid) for uid in users))
+        db.execute("INSERT INTO private_groups VALUES(?,?,?,0)",
+                   (group_id, actor["user_id"], json.dumps(roster)))
+        db.commit()
+        return group_id
+    except Exception:
+        db.rollback()
+        raise
+
+
+def group_info(db: sqlite3.Connection, actor: sqlite3.Row, group_id: str) -> dict:
+    group = db.execute("SELECT * FROM private_groups WHERE room_id=?", (group_id,)).fetchone()
+    require(group is not None and actor["device_id"] in json.loads(group["roster"]), 403, "Not authorized")
+    require(db.execute("SELECT 1 FROM devices WHERE id=? AND user_id=? AND state='active'",
+                       (actor["device_id"], actor["user_id"])).fetchone(),
+            401, "Authentication required")
+    peers = []
+    for device in json.loads(group["roster"]):
+        row = db.execute("""SELECT d.user_id,d.state,u.name FROM devices d JOIN users u ON u.id=d.user_id
+            WHERE d.id=?""", (device,)).fetchone()
+        peers.append({"device_id": device, "user_id": row["user_id"], "state": row["state"],
+                      "name": reveal(row["name"], "name")})
+    return {"room_id": group_id, "owner_user_id": group["owner_user_id"],
+            "blocked": bool(group["blocked"]), "devices": peers}
+
+
+def group_link(db: sqlite3.Connection, actor: sqlite3.Row, group_id: str, peer: str) -> dict:
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        require(db.execute("SELECT 1 FROM private_groups WHERE room_id=?", (group_id,)).fetchone() is not None,
+                404, "Group not found")
+        require(_room_device_authorized(db, group_id, actor["device_id"]) and
+                _room_device_authorized(db, group_id, peer), 403, "Group unavailable")
+        require(actor["device_id"] != peer)
+        left, right = sorted([actor["device_id"], peer])
+        row = db.execute("SELECT room_id FROM group_links WHERE group_id=? AND left_device=? AND right_device=?",
+                         (group_id, left, right)).fetchone()
+        if row is None:
+            room = secrets.token_urlsafe(16)
+            db.execute("INSERT INTO rooms VALUES(?,?,?)", (room, actor["device_id"], int(time.time())))
+            users = [db.execute("SELECT user_id FROM devices WHERE id=?", (device,)).fetchone()[0]
+                     for device in (left, right)]
+            db.executemany("INSERT INTO members VALUES(?,?)", ((room, user) for user in users))
+            db.execute("INSERT INTO group_links VALUES(?,?,?,?)", (room, group_id, left, right))
+        else:
+            room = row["room_id"]
+        db.commit()
+        return {"room_id": room}
+    except Exception:
+        db.rollback()
+        raise
+
+
+def remove_group_member(db: sqlite3.Connection, actor: sqlite3.Row, group_id: str, user_id: str) -> None:
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        group = db.execute("SELECT owner_user_id FROM private_groups WHERE room_id=?", (group_id,)).fetchone()
+        require(group is not None and group["owner_user_id"] == actor["user_id"] and
+                _room_device_authorized(db, group_id, actor["device_id"]), 403, "Not authorized")
+        changed = db.execute("DELETE FROM members WHERE room_id=? AND user_id=?", (group_id, user_id)).rowcount
+        require(changed == 1, 404, "Member not found")
+        # Fixed-roster groups close on change. No old sender state is reused to
+        # distribute keys to a replacement member or device. Create a new group.
+        db.execute("UPDATE private_groups SET blocked=1 WHERE room_id=?", (group_id,))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
 
 def send_envelope(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, recipient: str,
@@ -279,7 +379,7 @@ def send_envelope(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, reci
                 all(c in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for c in message_id))
     # A device-scoped stable ID lets a sender safely repeat an upload after a
     # lost response, without encrypting again or creating duplicate deliveries.
-    envelope_id = digest(actor["device_id"] + ":" + message_id) if message_id else secrets.token_urlsafe(16)
+    envelope_id = digest(":".join((actor["device_id"], room_id, recipient, message_id))) if message_id else secrets.token_urlsafe(16)
     db.execute("BEGIN IMMEDIATE")
     try:
         sender = db.execute("SELECT 1 FROM devices WHERE id=? AND user_id=? AND state='active'",
@@ -289,6 +389,10 @@ def send_envelope(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, reci
         target = db.execute("""SELECT d.id FROM devices d JOIN members m ON m.user_id=d.user_id
             WHERE m.room_id=? AND d.id=? AND d.state='active'""", (room_id, recipient)).fetchone()
         require(sender is not None and member is not None and target is not None, 403, "Not authorized")
+        require(db.execute("SELECT 1 FROM private_groups WHERE room_id=?", (room_id,)).fetchone() is None,
+                403, "Approved transport required")
+        require(_room_device_authorized(db, room_id, actor["device_id"]) and
+                _room_device_authorized(db, room_id, recipient), 403, "Not authorized")
         existing = db.execute("SELECT * FROM envelopes WHERE id=?", (envelope_id,)).fetchone()
         if existing is not None:
             require(existing["sender_device"] == actor["device_id"] and
@@ -323,6 +427,8 @@ def pending_envelopes(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str |
         JOIN members m ON m.room_id=e.room_id AND m.user_id=d.user_id
         WHERE e.recipient_device=? AND d.state='active' AND e.delivered_at IS NULL
         AND (? IS NULL OR e.room_id=?)
+        AND NOT EXISTS(SELECT 1 FROM group_links l JOIN private_groups g ON g.room_id=l.group_id
+          WHERE l.room_id=e.room_id AND g.blocked=1)
         ORDER BY e.created_at,e.id LIMIT 100""", (actor["device_id"], room_id, room_id)).fetchall()
     return [{**{key: row[key] for key in ("id", "room_id", "sender_device", "sender_user_id", "kind", "created_at")},
              "ciphertext": base64.b64encode(row["ciphertext"]).decode()} for row in rows]
@@ -351,6 +457,14 @@ PREKEY_FIELDS = (
 
 
 def _room_device_authorized(db: sqlite3.Connection, room_id: str, device_id: str) -> bool:
+    group = db.execute("SELECT roster,blocked FROM private_groups WHERE room_id=?", (room_id,)).fetchone()
+    if group is not None and (group["blocked"] or device_id not in json.loads(group["roster"])):
+        return False
+    link = db.execute("SELECT * FROM group_links WHERE room_id=?", (room_id,)).fetchone()
+    if link is not None:
+        if device_id not in (link["left_device"], link["right_device"]):
+            return False
+        return _room_device_authorized(db, link["group_id"], device_id)
     return db.execute("""SELECT 1 FROM devices d JOIN members m ON m.user_id=d.user_id
         WHERE d.id=? AND d.state='active' AND m.room_id=?""", (device_id, room_id)).fetchone() is not None
 
@@ -369,6 +483,8 @@ def publish_prekeys(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, pa
     db.execute("BEGIN IMMEDIATE")
     try:
         require(_room_device_authorized(db, room_id, actor["device_id"]), 403, "Not authorized")
+        require(db.execute("SELECT 1 FROM private_groups WHERE room_id=?", (room_id,)).fetchone() is None,
+                403, "Approved transport required")
         count = db.execute("SELECT COUNT(*) FROM members WHERE room_id=?", (room_id,)).fetchone()[0]
         require(count == 2, 403, "One-to-one room required")
         old = db.execute("""SELECT identity_key,registration_id,device_number,
@@ -527,7 +643,16 @@ class Handler(BaseHTTPRequestHandler):
                 return {"token": verify_login(db, data["device_id"], data["challenge"], data["signature"])}
             actor = active_session(db, self.headers.get("Authorization", "").removeprefix("Bearer "))
             if self.command == "GET" and path == "/v1/capabilities":
-                return {"capabilities": ["idempotent_envelopes_v1", "delivery_status_v1", "room_inbox_v1", "idempotent_prekeys_v1"]}
+                return {"capabilities": ["idempotent_envelopes_v1", "delivery_status_v1", "room_inbox_v1", "idempotent_prekeys_v1", "fixed_groups_v1"]}
+            if self.command == "POST" and path == "/v1/groups":
+                return {"room_id": create_group(db, actor, data["peer_devices"])}
+            if self.command == "GET" and len(parts) == 3 and parts[:2] == ["v1", "groups"]:
+                return group_info(db, actor, parts[2])
+            if self.command == "POST" and len(parts) == 5 and parts[:2] == ["v1", "groups"] and parts[3] == "links":
+                return group_link(db, actor, parts[2], parts[4])
+            if self.command == "POST" and len(parts) == 6 and parts[:2] == ["v1", "groups"] and parts[3] == "members" and parts[5] == "remove":
+                remove_group_member(db, actor, parts[2], parts[4])
+                return {"state": "closed"}
             if self.command == "GET" and path == "/v1/me":
                 row = db.execute("SELECT name,username FROM users WHERE id=?", (actor["user_id"],)).fetchone()
                 return {"user_id": actor["user_id"], "device_id": actor["device_id"],

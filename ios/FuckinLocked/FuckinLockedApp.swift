@@ -4,7 +4,7 @@ import PhotosUI
 import CryptoKit
 import LibSignalClient
 
-private enum Palette {
+enum Palette {
     static let background = Color(red: 16/255, green: 18/255, blue: 18/255)
     static let surface = Color(red: 31/255, green: 34/255, blue: 33/255)
     static let lime = Color(red: 182/255, green: 246/255, blue: 83/255)
@@ -100,7 +100,7 @@ private struct PrivacyCover: View {
     }
 }
 
-private struct PrimaryButton: View {
+struct PrimaryButton: View {
     let title: String
     let action: () -> Void
     var body: some View {
@@ -236,6 +236,7 @@ private struct ChatsView: View {
     @State private var search = ""
     @State private var groupsOnly = false
     @State private var compose = false
+    @State private var groupCompose = false
     var visible: [StoredChat] {
         vault.chats.filter { (!groupsOnly || $0.isGroup) &&
             (search.isEmpty || $0.title.localizedCaseInsensitiveContains(search)) }
@@ -246,6 +247,8 @@ private struct ChatsView: View {
                 HStack {
                     Text("Chats").font(.largeTitle.bold())
                     Spacer()
+                    Button { groupCompose = true } label: { Image(systemName: "person.2.badge.plus").font(.title3) }
+                        .accessibilityLabel("Create or join private group")
                     Button { compose = true } label: { Image(systemName: "square.and.pencil").font(.title3) }
                         .accessibilityLabel("Compose")
                 }
@@ -282,6 +285,7 @@ private struct ChatsView: View {
         }
         .navigationDestination(for: UUID.self) { id in ChatGateView(id: id) }
         .sheet(isPresented: $compose) { ComposeView() }
+        .sheet(isPresented: $groupCompose) { GroupComposeView() }
         .background(Palette.background)
         .foregroundStyle(Palette.text)
         .toolbar(.hidden, for: .navigationBar)
@@ -322,7 +326,7 @@ private struct ComposeView: View {
     private var oneToOneRooms: [JoinableRoom] {
         rooms.compactMap { room in
             let peers = room.members.filter { $0.id != vault.indexedUserID }
-            guard room.members.count == 2, let peer = peers.first else { return nil }
+            guard room.is_group != true, room.members.count == 2, let peer = peers.first else { return nil }
             return JoinableRoom(room: room, peer: peer)
         }
     }
@@ -447,6 +451,7 @@ private struct ComposeView: View {
 
 private struct ChatGateView: View {
     @EnvironmentObject var vault: LocalVault
+    @EnvironmentObject var gateway: Gateway
     @Environment(\.dismiss) var dismiss
     let id: UUID
     @State private var password = ""
@@ -455,7 +460,9 @@ private struct ChatGateView: View {
     var body: some View {
         Group {
             if vault.unlockedChatID == id {
-                ConversationView(id: id, title: title)
+                if let chat = vault.chats.first(where: { $0.id == id }), chat.isGroup, chat.roomID != nil {
+                    GroupConversationView(id: id, title: title, vault: vault, gateway: gateway)
+                } else { ConversationView(id: id, title: title) }
             } else {
                 PasswordLayout(title: title, subtitle: "This chat has a separate password.", content:
                     VStack(spacing: 14) {
@@ -695,7 +702,7 @@ private struct ConversationView: View {
     }
 }
 
-private struct ChangeChatPasswordView: View {
+struct ChangeChatPasswordView: View {
     @EnvironmentObject var vault: LocalVault
     @Environment(\.dismiss) var dismiss
     let id: UUID
@@ -721,13 +728,17 @@ private struct ChangeChatPasswordView: View {
     }
 }
 
-private struct StickerDrawer: View {
+struct StickerDrawer: View {
     @EnvironmentObject var vault: LocalVault
     @EnvironmentObject var messaging: MessagingService
     let id: UUID
     let insert: (String) -> Void
     let sendSticker: (StarterSticker) -> Void
     let close: () -> Void
+    init(id: UUID, insert: @escaping (String) -> Void,
+         sendSticker: @escaping (StarterSticker) -> Void, close: @escaping () -> Void) {
+        self.id = id; self.insert = insert; self.sendSticker = sendSticker; self.close = close
+    }
     @State private var search = ""
     @State private var library = ComposerLibrary()
     @State private var selected = "All"

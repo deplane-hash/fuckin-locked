@@ -57,6 +57,7 @@ struct RoomMember: Decodable, Identifiable {
 struct RoomInfo: Decodable, Identifiable {
     let id: String
     let members: [RoomMember]
+    let is_group: Bool?
 }
 struct RoomsResponse: Decodable { let rooms: [RoomInfo] }
 struct RelayEnvelope: Codable {
@@ -307,6 +308,27 @@ struct RelayPrekeyBundle: Codable {
     func memberDevices(_ userID: String) async throws -> [RoomDevice] {
         let result: RoomDevices = try await request("/v1/people/\(try routeID(userID))/devices")
         return result.devices
+    }
+
+    func createGroup(peerDevices: [String]) async throws -> String {
+        let peers = try peerDevices.map { try routeID($0) }
+        let result: RoomCreated = try await request("/v1/groups", method: "POST", body: ["peer_devices": peers])
+        return try routeID(result.room_id)
+    }
+
+    func groupInfo(_ id: String) async throws -> GroupInfo {
+        try await request("/v1/groups/\(try routeID(id))")
+    }
+
+    func groupLink(_ id: String, peerDevice: String) async throws -> String {
+        let result: RoomCreated = try await request("/v1/groups/\(try routeID(id))/links/\(try routeID(peerDevice))",
+                                                    method: "POST", body: [:])
+        return try routeID(result.room_id)
+    }
+
+    func removeGroupMember(_ id: String, userID: String) async throws {
+        let _: [String: String] = try await request("/v1/groups/\(try routeID(id))/members/\(try routeID(userID))/remove",
+                                                    method: "POST", body: [:])
     }
 
     func publishPrekeys(_ bundle: SignalPublicBundle, roomID: String) async throws {

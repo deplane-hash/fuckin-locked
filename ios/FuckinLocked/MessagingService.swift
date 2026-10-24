@@ -159,6 +159,14 @@ enum MessagingError: Error {
         try await sendContent(MessageContent(id: UUID(), text: "", image: image), in: id)
     }
 
+    func sendGroupContent(_ content: MessageContent, in id: UUID) async throws {
+        guard content.groupID != nil else { throw MessagingError.invalidMessage }
+        // Group fan-out reuses this tested per-device Signal transport. A retry
+        // must not advance the ratchet a second time for an already queued ID.
+        guard !vault.messageRecords.contains(where: { $0.id == content.id }) else { return }
+        try await sendContent(content, in: id)
+    }
+
     func react(_ reaction: String, to target: UUID, in id: UUID) async throws {
         guard vault.messageRecords.contains(where: { $0.id == target && $0.reactionTarget == nil }) else {
             throw MessagingError.invalidMessage
@@ -209,7 +217,8 @@ enum MessagingError: Error {
         let message = StoredMessage(id: content.id, body: content.text, sentAt: Date(), isOutgoing: true,
                                     delivery: .sending, envelopeID: nil, ciphertext: wire,
                                     image: content.image, reactionTarget: content.reactionTarget,
-                                    reaction: content.reaction)
+                                    reaction: content.reaction, groupID: content.groupID,
+                                    senderDeviceID: vault.deviceID)
         state = store.state
         try vault.commitChat(state: state, message: message, for: id)
         // Persist the exact wire bytes together with the advanced ratchet before
@@ -301,7 +310,8 @@ enum MessagingError: Error {
                                         isOutgoing: false, delivery: .received,
                                         envelopeID: envelope.id, ciphertext: nil,
                                         image: content.image, reactionTarget: content.reactionTarget,
-                                        reaction: content.reaction)
+                                        reaction: content.reaction, groupID: content.groupID,
+                                        senderDeviceID: envelope.sender_device)
             state = store.state
             try vault.commitReceived(state: state, message: message,
                                      envelopeID: envelope.id, for: id)
