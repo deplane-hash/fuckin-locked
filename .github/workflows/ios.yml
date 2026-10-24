@@ -60,3 +60,26 @@ jobs:
           if [ -f "$RUNNER_TEMP/fuckin-locked-relay.pid" ]; then
             kill "$(cat "$RUNNER_TEMP/fuckin-locked-relay.pid")" || true
           fi
+      - name: Build unsigned iPhone IPA artifact
+        run: |
+          build_dir="$RUNNER_TEMP/fuckin-locked-iphone-build"
+          xcodebuild build \
+            -workspace ios/FuckinLocked.xcworkspace \
+            -scheme FuckinLocked \
+            -configuration Release \
+            -sdk iphoneos \
+            CONFIGURATION_BUILD_DIR="$build_dir" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            -quiet
+          mkdir -p "$RUNNER_TEMP/fuckin-locked-ipa/Payload"
+          cp -R "$build_dir/FuckinLocked.app" "$RUNNER_TEMP/fuckin-locked-ipa/Payload/"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$RUNNER_TEMP/fuckin-locked-ipa/Payload" \
+            "$RUNNER_TEMP/fuckin-locked-unsigned.ipa"
+      - name: Upload unsigned iPhone IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuckin-locked-unsigned-ipa
+          path: ${{ runner.temp }}/fuckin-locked-unsigned.ipa
+          if-no-files-found: error
