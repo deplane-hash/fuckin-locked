@@ -45,7 +45,10 @@ final class LockLifecycleTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Lifecycle test friend"].exists)
         unlock.tap(); unlock.typeText(appPassword)
         app.buttons["Unlock"].tap()
-        XCTAssertTrue(friend.waitForExistence(timeout: 5), "App unlock after background must reopen Chats")
+        // App unlock intentionally performs the vault KDF before the inbox can
+        // render; allow the security work plus the SwiftUI transition to
+        // complete instead of treating it as a lock bypass/failure.
+        XCTAssertTrue(friend.waitForExistence(timeout: 15), "App unlock after background must reopen Chats")
         friend.tap()
         XCTAssertTrue(chatField.waitForExistence(timeout: 5), "Chat must be relocked after background")
         XCTAssertFalse(app.staticTexts["Local draft — delivery is not configured"].exists)
