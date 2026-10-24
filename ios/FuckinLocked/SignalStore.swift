@@ -43,6 +43,10 @@ struct SignalPublicBundle {
     let kyberPreKey: Data
     let kyberPreKeySignature: Data
 
+    var identityKeyFingerprint: String {
+        SHA256.hash(data: identityKey).map { String(format: "%02X", $0) }.joined()
+    }
+
     var requestBody: [String: Any] {
         ["registration_id": registrationID, "device_number": deviceNumber,
          "identity_key": identityKey.base64EncodedString(),

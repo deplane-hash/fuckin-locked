@@ -62,6 +62,7 @@ struct StoredChat: Codable, Identifiable {
 
 enum MessageDelivery: String, Codable {
     case sending
+    case accepted
     case delivered
     case received
 }
@@ -74,6 +75,10 @@ struct StoredMessage: Codable, Identifiable, Equatable {
     var delivery: MessageDelivery
     var envelopeID: String?
     var ciphertext: Data?
+    var image: Data? = nil
+    var reactionTarget: UUID? = nil
+    var reaction: String? = nil
+    var reactions: [String: String]? = nil
 }
 
 struct ChatPayload: Codable {
@@ -166,6 +171,7 @@ struct DelayLedger: Codable {
     private var appKey: SymmetricKey?
     private var chatKey: SymmetricKey?
     private var chatPayload: ChatPayload?
+    private(set) var chatGeneration: UInt64 = 0
     private var header: VaultHeader?
     private var index = StoredIndex()
     private let encoder = JSONEncoder()
@@ -361,10 +367,12 @@ struct DelayLedger: Codable {
         let changed = VaultHeader(salt: salt, wrappedKey: try seal(raw, key: derive(new, salt: salt)),
                                   encryptedIndex: record.encryptedIndex)
         try write(encoder.encode(changed), to: vaultURL)
+        // The replacement is now authoritative even if the separate delay
+        // reset fails. Subsequent saves must never resurrect the old wrapper.
+        header = changed
         var ledger = try loadDelay()
         ledger.app = DelayRecord()
         try saveDelay(ledger)
-        header = changed
     }
 
     func createChat(title: String, isGroup: Bool, password: String) throws {
@@ -437,7 +445,7 @@ struct DelayLedger: Codable {
     }
 
     private func commitChatPayload(_ payload: ChatPayload, for id: UUID) throws {
-        guard isUnlocked, let chatKey,
+        guard isUnlocked, unlockedChatID == id, let chatKey,
               let position = index.chats.firstIndex(where: { $0.id == id }) else {
             throw VaultError.corrupt
         }
@@ -453,6 +461,7 @@ struct DelayLedger: Codable {
         guard unlockedChatID == id, var payload = chatPayload else { throw VaultError.corrupt }
         payload.signal = state
         if let message { payload.messages.append(message) }
+        applyReactions(to: &payload)
         try commitChatPayload(payload, for: id)
     }
 
@@ -473,13 +482,15 @@ struct DelayLedger: Codable {
         try commitChatPayload(payload, for: id)
     }
 
-    func markMessageDelivered(_ messageID: UUID, envelopeID: String, for id: UUID) throws {
+    func markMessageDelivered(_ messageID: UUID, envelopeID: String, for id: UUID,
+                              delivery: MessageDelivery = .accepted) throws {
         guard unlockedChatID == id, var payload = chatPayload,
               let position = payload.messages.firstIndex(where: { $0.id == messageID }) else {
             throw VaultError.corrupt
         }
-        payload.messages[position].delivery = .delivered
+        payload.messages[position].delivery = delivery
         payload.messages[position].envelopeID = envelopeID
+        payload.messages[position].ciphertext = nil
         try commitChatPayload(payload, for: id)
     }
 
@@ -495,7 +506,18 @@ struct DelayLedger: Codable {
         payload.signal = state
         payload.processedEnvelopeIDs.insert(envelopeID)
         payload.messages.append(message)
+        applyReactions(to: &payload)
         try commitChatPayload(payload, for: id)
+    }
+
+    private func applyReactions(to payload: inout ChatPayload) {
+        for event in payload.messages {
+            guard let target = event.reactionTarget, let reaction = event.reaction,
+                  let position = payload.messages.firstIndex(where: { $0.id == target && $0.reactionTarget == nil }) else { continue }
+            var reactions = payload.messages[position].reactions ?? [:]
+            reactions[event.isOutgoing ? "you" : "peer"] = reaction
+            payload.messages[position].reactions = reactions
+        }
     }
 
     func signalState(for id: UUID) throws -> SignalState? {
@@ -537,6 +559,7 @@ struct DelayLedger: Codable {
     }
 
     func lockChat() {
+        chatGeneration &+= 1
         messages.removeAll(keepingCapacity: false)
         messageRecords.removeAll(keepingCapacity: false)
         chatPayload = nil

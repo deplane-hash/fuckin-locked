@@ -50,10 +50,17 @@ jobs:
           export FL_RUN_RELAY_INTEGRATION=1
           xcodebuild test \
             -workspace FuckinLocked.xcworkspace \
-            -scheme FuckinLocked \
+            -scheme FuckinLockedRelayTests \
             -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' \
+            -resultBundlePath "$RUNNER_TEMP/FuckinLockedTests.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
             -quiet
+      - name: Upload simulator test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuckin-locked-simulator-results
+          path: ${{ runner.temp }}/FuckinLockedTests.xcresult
       - name: Stop local HTTPS relay integration fixture
         if: always()
         run: |

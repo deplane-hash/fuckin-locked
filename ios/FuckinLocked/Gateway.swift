@@ -273,25 +273,36 @@ struct RelayPrekeyBundle: Codable {
     }
 
     func sendEnvelope(roomID: String, recipientDevice: String, kind: String,
-                      ciphertext: Data) async throws -> String {
+                      ciphertext: Data, messageID: String? = nil) async throws -> String {
         guard token != nil else { throw ConnectionError.unavailable }
         let room = try routeID(roomID)
         let recipient = try routeID(recipientDevice)
         guard ["message", "attachment", "key_update"].contains(kind) else {
             throw ConnectionError.invalidResponse
         }
-        let result: [String: String] = try await request("/v1/envelopes", method: "POST", body: [
+        var body: [String: Any] = [
             "room_id": room, "recipient_device": recipient, "kind": kind,
             "ciphertext": ciphertext.base64EncodedString()
-        ])
+        ]
+        if let messageID { body["message_id"] = try routeID(messageID) }
+        let result: [String: String] = try await request("/v1/envelopes", method: "POST", body: body)
         guard let id = result["id"] else { throw ConnectionError.invalidResponse }
         return try routeID(id)
     }
 
-    func pendingEnvelopes() async throws -> [RelayEnvelope] {
+    func pendingEnvelopes(roomID: String? = nil) async throws -> [RelayEnvelope] {
         guard token != nil else { throw ConnectionError.unavailable }
-        let result: RelayEnvelopes = try await request("/v1/envelopes")
+        let path = try roomID.map { "/v1/rooms/\(try routeID($0))/envelopes/pending" } ?? "/v1/envelopes"
+        let result: RelayEnvelopes = try await request(path)
         return result.envelopes
+    }
+
+    func envelopeStatus(_ id: String) async throws -> String {
+        let result: [String: String] = try await request("/v1/envelopes/\(try routeID(id))/status")
+        guard let state = result["state"], ["accepted", "delivered"].contains(state) else {
+            throw ConnectionError.invalidResponse
+        }
+        return state
     }
 
     func acknowledgeEnvelope(_ id: String) async throws {

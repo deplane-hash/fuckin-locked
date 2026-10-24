@@ -30,6 +30,32 @@ def sample_bundle(identity=None):
 
 
 class RelayTests(unittest.TestCase):
+    def test_retry_is_idempotent_and_delivery_status_is_sender_only(self):
+        code = service.create_invitation(self.db, self.actor["device_id"])
+        friend = service.redeem_invitation(self.db, code, "Friend", "friend", pub(Ed25519PrivateKey.generate()))
+        service.approve_admission(self.db, self.actor, friend["admission_id"])
+        room = service.create_room(self.db, self.actor, [friend["user_id"]])
+        recipient = service.active_session(self.db, service.issue_session(self.db, friend["device_id"]))
+        self.db.commit()
+        ciphertext = base64.b64encode(os.urandom(96)).decode()
+        envelope = service.send_envelope(self.db, self.actor, room, friend["device_id"], "message", ciphertext, "stable-id")
+        self.assertEqual(service.send_envelope(self.db, self.actor, room, friend["device_id"], "message", ciphertext, "stable-id"), envelope)
+        self.assertEqual(len(service.pending_envelopes(self.db, recipient, room)), 1)
+        self.assertEqual(service.pending_envelopes(self.db, recipient, "another-room"), [])
+        self.assertEqual(service.envelope_status(self.db, self.actor, envelope), {"state": "accepted"})
+        with self.assertRaises(service.Error):
+            service.envelope_status(self.db, recipient, envelope)
+        with self.assertRaises(service.Error):
+            service.send_envelope(self.db, self.actor, room, friend["device_id"], "message",
+                                  base64.b64encode(os.urandom(96)).decode(), "stable-id")
+        service.acknowledge_envelope(self.db, recipient, envelope)
+        self.assertEqual(service.envelope_status(self.db, self.actor, envelope), {"state": "delivered"})
+        self.assertEqual(service.send_envelope(self.db, self.actor, room, friend["device_id"], "message", ciphertext, "stable-id"), envelope)
+        self.assertEqual(service.pending_envelopes(self.db, recipient, room), [])
+        service.revoke_device(self.db, recipient, friend["device_id"])
+        with self.assertRaises(service.Error):
+            service.send_envelope(self.db, self.actor, room, friend["device_id"], "message", ciphertext, "stable-id")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         os.environ["FL_METADATA_KEY"] = base64.b64encode(os.urandom(32)).decode()

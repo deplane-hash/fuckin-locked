@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import UIKit
 @testable import FuckinLocked
 
 private final class LoopbackTrustDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate {
@@ -116,6 +117,7 @@ private final class LoopbackTrustDelegate: NSObject, URLSessionDelegate, URLSess
         try bobMessaging.verifyPeer(for: bobChatID)
 
         try await aliceMessaging.send("hello from alice", in: aliceChatID)
+        XCTAssertEqual(aliceVault.messageRecords.last?.delivery, .accepted)
         try await bobMessaging.receive(in: bobChatID)
         XCTAssertEqual(bobVault.messageRecords.last?.body, "hello from alice")
         XCTAssertEqual(bobVault.messageRecords.last?.isOutgoing, false)
@@ -124,5 +126,31 @@ private final class LoopbackTrustDelegate: NSObject, URLSessionDelegate, URLSess
         try await aliceMessaging.receive(in: aliceChatID)
         XCTAssertEqual(aliceVault.messageRecords.last?.body, "hello from bob")
         XCTAssertEqual(aliceVault.messageRecords.last?.isOutgoing, false)
+        try await aliceMessaging.receive(in: aliceChatID)
+        XCTAssertEqual(aliceVault.messageRecords.first?.delivery, .delivered)
+        XCTAssertEqual(aliceVault.messageRecords.filter { !$0.isOutgoing }.count, 1)
+        // Reopening from disk requires both passwords and preserves the ratchet.
+        bobVault.lockApp()
+        try bobVault.unlock("bob app password")
+        try bobVault.unlockChat(bobChatID, password: "bob chat password")
+        try await bobMessaging.send("after restart", in: bobChatID)
+        try await aliceMessaging.receive(in: aliceChatID)
+        XCTAssertEqual(aliceVault.messageRecords.last?.body, "after restart")
+        let target = try XCTUnwrap(bobVault.messageRecords.first(where: { !$0.isOutgoing })?.id)
+        try await bobMessaging.react("💚", to: target, in: bobChatID)
+        try await aliceMessaging.receive(in: aliceChatID)
+        XCTAssertEqual(aliceVault.messageRecords.first(where: { $0.id == target })?.reactions?["peer"], "💚")
+        let raster = UIGraphicsImageRenderer(size: CGSize(width: 20, height: 20)).image { context in
+            UIColor.green.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 20, height: 20))
+        }
+        let jpeg = try PrivateImage.importImage(XCTUnwrap(raster.pngData()))
+        try await aliceMessaging.sendImage(jpeg, in: aliceChatID)
+        try await bobMessaging.receive(in: bobChatID)
+        XCTAssertEqual(bobVault.messageRecords.last?.image, jpeg)
+        bobVault.lockApp()
+        let saved = try Data(contentsOf: root.appendingPathComponent("bob/vault.bin"))
+        XCTAssertNil(saved.range(of: jpeg))
+        XCTAssertFalse(String(decoding: saved, as: UTF8.self).contains("hello from alice"))
     }
 }

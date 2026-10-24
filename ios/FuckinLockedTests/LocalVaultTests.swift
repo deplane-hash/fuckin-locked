@@ -3,6 +3,38 @@ import LibSignalClient
 @testable import FuckinLocked
 
 @MainActor final class LocalVaultTests: XCTestCase {
+    func testRelockInvalidatesAsyncGenerationAndEncryptedOutboxSurvivesRestart() throws {
+        let root = folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = LocalVault(directory: root)
+        try vault.createAppPassword("correct app password")
+        try vault.createChat(title: "Friend", isGroup: false, password: "separate chat password")
+        let id = try XCTUnwrap(vault.chats.first?.id)
+        try vault.unlockChat(id, password: "separate chat password")
+        let generation = vault.chatGeneration
+        let message = StoredMessage(id: UUID(), body: "private queued content", sentAt: Date(),
+                                    isOutgoing: true, delivery: .sending, envelopeID: nil,
+                                    ciphertext: Data(repeating: 42, count: 96))
+        try vault.commitChat(state: .new(), message: message, for: id)
+        vault.lockChat()
+        XCTAssertNotEqual(vault.chatGeneration, generation)
+        XCTAssertThrowsError(try vault.signalState(for: id))
+        let restarted = LocalVault(directory: root)
+        try restarted.unlock("correct app password")
+        XCTAssertTrue(restarted.messageRecords.isEmpty)
+        try restarted.unlockChat(id, password: "separate chat password")
+        XCTAssertEqual(restarted.messageRecords.first, message)
+        let saved = try Data(contentsOf: root.appendingPathComponent("vault.bin"))
+        XCTAssertFalse(String(decoding: saved, as: UTF8.self).contains(message.body))
+    }
+
+    func testStructuredContentRejectsUnboundedImagesAndInvalidReactions() throws {
+        XCTAssertThrowsError(try MessageContent(id: UUID(), text: "", image: Data(repeating: 0, count: 256_001)).validate())
+        XCTAssertThrowsError(try MessageContent(id: UUID(), text: "", reactionTarget: UUID(), reaction: "arbitrary").validate())
+        XCTAssertThrowsError(try MessageContent(id: UUID(), text: "").validate())
+        XCTAssertNoThrow(try MessageContent(id: UUID(), text: "hello").validate())
+        XCTAssertNoThrow(try MessageContent(id: UUID(), text: "", reactionTarget: UUID(), reaction: "💚").validate())
+    }
     private func folder() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     }

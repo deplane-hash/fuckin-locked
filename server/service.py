@@ -264,11 +264,16 @@ def list_rooms(db: sqlite3.Connection, actor: sqlite3.Row) -> list[dict]:
 
 
 def send_envelope(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, recipient: str,
-                  kind: str, ciphertext_b64: str) -> str:
+                  kind: str, ciphertext_b64: str, message_id: str | None = None) -> str:
     require(kind in ("message", "attachment", "key_update"))
     ciphertext = b64(ciphertext_b64)
     require(16 <= len(ciphertext) <= MAX_BODY, message="Invalid ciphertext")
-    envelope_id = secrets.token_urlsafe(16)
+    if message_id is not None:
+        require(isinstance(message_id, str) and 1 <= len(message_id) <= 128 and
+                all(c in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for c in message_id))
+    # A device-scoped stable ID lets a sender safely repeat an upload after a
+    # lost response, without encrypting again or creating duplicate deliveries.
+    envelope_id = digest(actor["device_id"] + ":" + message_id) if message_id else secrets.token_urlsafe(16)
     db.execute("BEGIN IMMEDIATE")
     try:
         sender = db.execute("SELECT 1 FROM devices WHERE id=? AND user_id=? AND state='active'",
@@ -278,6 +283,14 @@ def send_envelope(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, reci
         target = db.execute("""SELECT d.id FROM devices d JOIN members m ON m.user_id=d.user_id
             WHERE m.room_id=? AND d.id=? AND d.state='active'""", (room_id, recipient)).fetchone()
         require(sender is not None and member is not None and target is not None, 403, "Not authorized")
+        existing = db.execute("SELECT * FROM envelopes WHERE id=?", (envelope_id,)).fetchone()
+        if existing is not None:
+            require(existing["sender_device"] == actor["device_id"] and
+                    existing["room_id"] == room_id and existing["recipient_device"] == recipient and
+                    existing["kind"] == kind and existing["ciphertext"] == ciphertext,
+                    409, "Message identifier conflict")
+            db.commit()
+            return envelope_id
         db.execute("INSERT INTO envelopes VALUES(?,?,?,?,?,?,?,NULL)",
                    (envelope_id, room_id, actor["device_id"], recipient, kind, ciphertext, int(time.time())))
         db.commit()
@@ -287,14 +300,24 @@ def send_envelope(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, reci
     return envelope_id
 
 
-def pending_envelopes(db: sqlite3.Connection, actor: sqlite3.Row) -> list[dict]:
+def envelope_status(db: sqlite3.Connection, actor: sqlite3.Row, envelope_id: str) -> dict:
+    row = db.execute("""SELECT e.delivered_at FROM envelopes e
+        JOIN devices d ON d.id=e.sender_device JOIN members m ON m.room_id=e.room_id AND m.user_id=d.user_id
+        WHERE e.id=? AND e.sender_device=? AND d.state='active'""",
+        (envelope_id, actor["device_id"])).fetchone()
+    require(row is not None, 404, "Envelope not found")
+    return {"state": "delivered" if row["delivered_at"] is not None else "accepted"}
+
+
+def pending_envelopes(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str | None = None) -> list[dict]:
     rows = db.execute("""SELECT e.id,e.room_id,e.sender_device,sd.user_id sender_user_id,
         e.kind,e.ciphertext,e.created_at
         FROM envelopes e JOIN devices d ON d.id=e.recipient_device
         JOIN devices sd ON sd.id=e.sender_device
         JOIN members m ON m.room_id=e.room_id AND m.user_id=d.user_id
         WHERE e.recipient_device=? AND d.state='active' AND e.delivered_at IS NULL
-        ORDER BY e.created_at,e.id LIMIT 100""", (actor["device_id"],)).fetchall()
+        AND (? IS NULL OR e.room_id=?)
+        ORDER BY e.created_at,e.id LIMIT 100""", (actor["device_id"], room_id, room_id)).fetchall()
     return [{**{key: row[key] for key in ("id", "room_id", "sender_device", "sender_user_id", "kind", "created_at")},
              "ciphertext": base64.b64encode(row["ciphertext"]).decode()} for row in rows]
 
@@ -522,9 +545,13 @@ class Handler(BaseHTTPRequestHandler):
                 return take_prekeys(db, actor, parts[2], parts[4])
             if self.command == "POST" and path == "/v1/envelopes":
                 return {"id": send_envelope(db, actor, data["room_id"], data["recipient_device"],
-                                            data["kind"], data["ciphertext"])}
+                                            data["kind"], data["ciphertext"], data.get("message_id"))}
             if self.command == "GET" and path == "/v1/envelopes":
                 return {"envelopes": pending_envelopes(db, actor)}
+            if self.command == "GET" and len(parts) == 5 and parts[:2] == ["v1", "rooms"] and parts[3:] == ["envelopes", "pending"]:
+                return {"envelopes": pending_envelopes(db, actor, parts[2])}
+            if self.command == "GET" and len(parts) == 4 and parts[:2] == ["v1", "envelopes"] and parts[3] == "status":
+                return envelope_status(db, actor, parts[2])
             if self.command == "POST" and path.startswith("/v1/envelopes/") and path.endswith("/ack"):
                 acknowledge_envelope(db, actor, path.split("/")[3])
                 return {"state": "delivered"}

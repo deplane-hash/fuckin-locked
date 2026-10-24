@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import PhotosUI
 
 private enum Palette {
     static let background = Color(red: 16/255, green: 18/255, blue: 18/255)
@@ -433,6 +434,9 @@ private struct ConversationView: View {
     @State private var drawer = false
     @State private var showChangePassword = false
     @State private var fingerprint = ""
+    @State private var ownFingerprint = ""
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var viewedImage: Data?
     @State private var verified = false
     @State private var status = ""
 
@@ -446,6 +450,15 @@ private struct ConversationView: View {
                 Button("Lock chat") { draft = ""; vault.lockChat() }
                     .foregroundStyle(Palette.lime)
             }.padding(.horizontal)
+            if !ownFingerprint.isEmpty && !verified {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Your fingerprint").font(.headline)
+                    Text("Your friend compares this with the fingerprint shown for you on their phone.")
+                        .font(.footnote).foregroundStyle(Palette.muted)
+                    Text(ownFingerprint).font(.caption2.monospaced()).textSelection(.disabled)
+                }.padding(16).background(Palette.surface, in: RoundedRectangle(cornerRadius: 16))
+                    .padding(.horizontal)
+            }
             if !fingerprint.isEmpty && !verified {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Verify this device before sending")
@@ -459,10 +472,6 @@ private struct ConversationView: View {
                             try messaging.verifyPeer(for: id)
                             verified = true
                             status = "Device verified"
-                            Task {
-                                do { try await messaging.receive(in: id) }
-                                catch { status = "Device verified — messages will retry when connected" }
-                            }
                         } catch { status = "Verification failed" }
                     }.foregroundStyle(Palette.lime)
                 }
@@ -471,18 +480,46 @@ private struct ConversationView: View {
             }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(vault.messageRecords) { message in
+                    ForEach(vault.messageRecords.filter { $0.reactionTarget == nil }) { message in
                         HStack {
                             if message.isOutgoing { Spacer(minLength: 36) }
                             VStack(alignment: message.isOutgoing ? .trailing : .leading, spacing: 3) {
-                                Text(message.body).padding(11)
-                                    .foregroundStyle(message.isOutgoing ? Palette.background : Palette.text)
-                                    .background(message.isOutgoing ? Palette.lime : Palette.surface,
-                                                in: RoundedRectangle(cornerRadius: 16))
+                                if let bytes = message.image, let image = UIImage(data: bytes) {
+                                    Button { viewedImage = bytes } label: {
+                                        Image(uiImage: image).resizable().scaledToFit()
+                                            .frame(maxWidth: 220, maxHeight: 220)
+                                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                                    }.accessibilityLabel("View image")
+                                }
+                                if !message.body.isEmpty {
+                                    Text(message.body).padding(11)
+                                        .foregroundStyle(message.isOutgoing ? Palette.background : Palette.text)
+                                        .background(message.isOutgoing ? Palette.lime : Palette.surface,
+                                                    in: RoundedRectangle(cornerRadius: 16))
+                                }
+                                if let reactions = message.reactions, !reactions.isEmpty {
+                                    Text(reactions.sorted { $0.key < $1.key }.map(\.value).joined(separator: " "))
+                                        .accessibilityLabel("Reactions \(reactions.values.joined(separator: " "))")
+                                }
+                                Menu {
+                                    ForEach(MessageContent.reactions, id: \.self) { reaction in
+                                        Button(reaction) {
+                                            Task {
+                                                do { try await messaging.react(reaction, to: message.id, in: id) }
+                                                catch { status = "Can't send reaction" }
+                                            }
+                                        }
+                                    }
+                                } label: {
+                                    Image(systemName: "face.smiling").frame(minWidth: 44, minHeight: 44)
+                                }.disabled(!verified || messaging.working)
+                                    .accessibilityLabel("React to message")
                                 if message.isOutgoing {
-                                    Text(message.delivery == .delivered ? "Sent" : "Sending")
+                                    Text(message.delivery == .delivered ? "Delivered" :
+                                         message.delivery == .accepted ? "Sent" : "Waiting to send")
                                         .font(.caption2).foregroundStyle(Palette.muted)
                                 }
+                                Text(message.sentAt, style: .time).font(.caption2).foregroundStyle(Palette.muted)
                             }
                             if !message.isOutgoing { Spacer(minLength: 36) }
                         }
@@ -497,36 +534,94 @@ private struct ConversationView: View {
                     .disabled(!verified)
                 Button {
                     let outgoing = draft
+                    let generation = vault.chatGeneration
                     draft = ""
                     Task {
                         do { try await messaging.send(outgoing, in: id) }
                         catch MessagingError.identityVerificationRequired(let value) {
+                            guard vault.chatGeneration == generation else { return }
                             fingerprint = value; verified = false; status = "Verify the device first"; draft = outgoing
                         }
-                        catch { status = "Can't send"; draft = outgoing }
+                        catch {
+                            guard vault.chatGeneration == generation else { return }
+                            // If saved in the encrypted outbox, it retries automatically;
+                            // restoring the draft here would encourage duplicate sends.
+                            status = "Can't connect. Saved messages retry while this chat is open."
+                        }
                     }
                 } label: { Image(systemName: "arrow.up.circle.fill") }
-                    .disabled(!verified || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!verified || messaging.working || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityLabel("Send message")
-                Button {} label: { Image(systemName: "paperclip") }
-                    .disabled(true).accessibilityLabel("Attachments unavailable")
+                PhotosPicker(selection: $selectedPhoto, matching: .images,
+                             preferredItemEncoding: .current) {
+                    Image(systemName: "paperclip").frame(minWidth: 44, minHeight: 44)
+                }.disabled(!verified || messaging.working).accessibilityLabel("Attach image")
             }.padding(14).background(Palette.surface, in: Capsule()).padding(.horizontal)
-            if drawer { StickerDrawer() }
+            if drawer {
+                StickerDrawer(insert: { draft += $0 }, close: { drawer = false })
+            }
         }
         .background(Palette.background).foregroundStyle(Palette.text)
+        .overlay {
+            if let viewedImage, let image = UIImage(data: viewedImage) {
+                VStack {
+                    Button("Close image") { self.viewedImage = nil }.padding()
+                    Spacer()
+                    Image(uiImage: image).resizable().scaledToFit().accessibilityLabel("Message image")
+                    Spacer()
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Palette.background).ignoresSafeArea(edges: .bottom)
+            }
+        }
+        .onChange(of: selectedPhoto) { _, item in
+            guard let item else { return }
+            let generation = vault.chatGeneration
+            Task {
+                defer { selectedPhoto = nil }
+                do {
+                    guard let bytes = try await item.loadTransferable(type: Data.self),
+                          vault.chatGeneration == generation else { return }
+                    let image = try PrivateImage.importImage(bytes)
+                    try await messaging.sendImage(image, in: id)
+                } catch {
+                    guard vault.chatGeneration == generation else { return }
+                    status = "Image unavailable or connection interrupted. Saved messages retry automatically."
+                }
+            }
+        }
         .sheet(isPresented: $showChangePassword) { ChangeChatPasswordView(id: id) }
         .task {
-            do {
-                fingerprint = try await messaging.preparePeerVerification(for: id)
-                verified = try messaging.isPeerVerified(for: id)
-                if verified { try? await messaging.receive(in: id) }
-            } catch MessagingError.localChatOnly {
-                status = "Local draft — delivery is not configured"
-            } catch MessagingError.identityVerificationRequired(let value) {
-                fingerprint = value
-            } catch { status = "Can't connect" }
+            let generation = vault.chatGeneration
+            while !Task.isCancelled && vault.chatGeneration == generation && vault.unlockedChatID == id {
+                do {
+                    if !messaging.working {
+                        if !verified {
+                            fingerprint = try await messaging.preparePeerVerification(for: id)
+                            verified = try messaging.isPeerVerified(for: id)
+                        } else {
+                            try await messaging.receive(in: id)
+                        }
+                        guard vault.chatGeneration == generation else { return }
+                        ownFingerprint = (try? messaging.ownFingerprint(for: id)) ?? ""
+                        status = ""
+                    }
+                } catch MessagingError.localChatOnly {
+                    status = "Local draft — delivery is not configured"
+                    return
+                } catch MessagingError.identityVerificationRequired(let value) {
+                    fingerprint = value; verified = false
+                } catch {
+                    guard vault.chatGeneration == generation else { return }
+                    ownFingerprint = (try? messaging.ownFingerprint(for: id)) ?? ""
+                    status = "Can't connect. Retrying while this chat is open."
+                }
+                do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            }
         }
-        .onDisappear { draft = ""; drawer = false; vault.lockChat() }
+        .onDisappear {
+            draft = ""; fingerprint = ""; ownFingerprint = ""; drawer = false
+            selectedPhoto = nil; viewedImage = nil; vault.lockChat()
+        }
     }
 }
 
@@ -557,18 +652,58 @@ private struct ChangeChatPasswordView: View {
 }
 
 private struct StickerDrawer: View {
+    let insert: (String) -> Void
+    let close: () -> Void
     @State private var search = ""
-    private let items = ["🙂", "😄", "💚", "✨", "🔥", "🙌", "🎉", "🌙", "🐈", "🦊", "🪐", "🍋"]
+    @State private var recent: [String] = []
+    @State private var favorites: Set<String> = []
+    @State private var selected = "All"
+    private let items = [
+        ("🙂", "smile happy"), ("😄", "laugh happy"), ("💚", "green heart love"),
+        ("✨", "sparkles stars"), ("🔥", "fire hot"), ("🙌", "hands celebrate"),
+        ("🎉", "party celebration"), ("🌙", "moon night"), ("🐈", "cat animal"),
+        ("🦊", "fox animal"), ("🪐", "planet space"), ("🍋", "lemon fruit")
+    ]
+    private var visible: [(String, String)] {
+        let source = selected == "Recent" ? recent.compactMap { value in items.first { $0.0 == value } } : items
+        return source.filter {
+            (selected != "Favorites" || favorites.contains($0.0)) &&
+            (search.isEmpty || $0.1.localizedCaseInsensitiveContains(search) || $0.0 == search)
+        }
+    }
     var body: some View {
         VStack(spacing: 12) {
             Capsule().fill(Palette.muted).frame(width: 36, height: 4)
-            Text("Emoji").font(.headline)
-            TextField("Search locally", text: $search).flField()
-            if search.isEmpty {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
-                    ForEach(items, id: \.self) { item in Text(item).font(.largeTitle).frame(minHeight: 48) }
-                }
+            HStack {
+                Text("Emoji").font(.headline)
+                Spacer()
+                Button("Close", action: close)
             }
+            TextField("Search locally", text: $search).flField()
+            Picker("Emoji collection", selection: $selected) {
+                ForEach(["All", "Recent", "Favorites"], id: \.self) { Text($0) }
+            }.pickerStyle(.segmented)
+            ScrollView {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
+                    ForEach(visible, id: \.0) { item in
+                        VStack(spacing: 0) {
+                            Button {
+                                insert(item.0)
+                                recent.removeAll { $0 == item.0 }
+                                recent.insert(item.0, at: 0)
+                            } label: { Text(item.0).font(.largeTitle).frame(minHeight: 48) }
+                                .accessibilityLabel("Insert \(item.1)")
+                            Button {
+                                if favorites.contains(item.0) { favorites.remove(item.0) }
+                                else { favorites.insert(item.0) }
+                            } label: {
+                                Image(systemName: favorites.contains(item.0) ? "star.fill" : "star")
+                                    .frame(minWidth: 44, minHeight: 44)
+                            }.accessibilityLabel("Favorite \(item.1)")
+                        }
+                    }
+                }
+            }.frame(maxHeight: 240)
         }.padding().background(Palette.surface, in: UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24))
     }
 }

@@ -25,6 +25,16 @@ settings:
 configFiles:
   Debug: Config.xcconfig
   Release: Config.xcconfig
+schemes:
+  FuckinLockedRelayTests:
+    build:
+      targets:
+        FuckinLocked: all
+    test:
+      targets:
+        - FuckinLockedTests
+      environmentVariables:
+        FL_RUN_RELAY_INTEGRATION: "1"
 targets:
   FuckinLocked:
     type: application
