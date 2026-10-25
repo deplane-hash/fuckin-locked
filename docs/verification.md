@@ -2,6 +2,24 @@
 
 ## Current milestone status (supersedes historical notes below)
 
+- The voice-call transport is now implemented in source: authenticated call
+  signaling is carried as libsignal ciphertext, WebRTC is configured with
+  relay-only ICE and a same-host `turns:` endpoint, and calls stop on inactive
+  transitions. The server advertises `encrypted_calls_v1` only with a complete
+  TURN-over-TLS configuration and never exposes the route without an active
+  session. Calls remain omitted from bottom navigation.
+- Server suite currently passes **21 tests**, including authenticated TURN
+  capability gating, invalid/absent TURN configuration, opaque envelope
+  storage, revocation, and invitation races.
+- Xcode run `40144712171` compiled the WebRTC/libsignal integration and passed
+  the full protocol/vault simulator suite, including the call-signal ciphertext
+  assertion. Its lifecycle UI test failed only on the local-draft status lookup;
+  run `40145403938` reruns that test using the explicit accessibility identifier.
+- A physical two-iPhone test is still required for microphone permission,
+  TURN certificate/credential rotation, DTLS-SRTP audio, background teardown,
+  capture behavior, and call interruption. The call path is not production-ready
+  or independently reviewed.
+
 - The local relay suite now has **18 passing tests**, including actual HTTP route
   dispatch/auth, stable ciphertext upload IDs/conflict detection, sender-only
   delivery status, expiring device approval and recoverable requester-scoped

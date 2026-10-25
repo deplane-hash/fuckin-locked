@@ -32,7 +32,6 @@ import UIKit
     }
 
     deinit {
-        if let lifecycleToken { NotificationCenter.default.removeObserver(lifecycleToken) }
         stateTask?.cancel()
     }
 
@@ -142,6 +141,14 @@ import UIKit
         stateTask = nil
         state = .idle
         if sendHangup { status = "" }
+    }
+
+    func close() {
+        if let lifecycleToken {
+            NotificationCenter.default.removeObserver(lifecycleToken)
+            self.lifecycleToken = nil
+        }
+        stop(sendHangup: false)
     }
 }
 

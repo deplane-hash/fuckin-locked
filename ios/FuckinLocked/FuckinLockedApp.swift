@@ -493,7 +493,12 @@ private struct ChatGateView: View {
         .onAppear {
             DispatchQueue.main.async { passwordFocused = true }
         }
-        .onDisappear { password = ""; passwordFocused = false; vault.lockChat() }
+        // ConversationView owns relocking when the conversation actually
+        // leaves the navigation stack. Do not relock from this gate's
+        // lifecycle: SwiftUI can tear down the password branch while it is
+        // replacing it with the unlocked conversation, which would make a
+        // successful unlock immediately disappear.
+        .onDisappear { password = ""; passwordFocused = false }
     }
 }
 
@@ -745,7 +750,7 @@ private struct ConversationView: View {
         }
         .onDisappear {
             draft = ""; fingerprint = ""; ownFingerprint = ""; drawer = false
-            selectedPhoto = nil; viewedImage = nil; callController?.stop(sendHangup: false)
+            selectedPhoto = nil; viewedImage = nil; callController?.close()
             callController = nil; vault.lockChat()
         }
     }

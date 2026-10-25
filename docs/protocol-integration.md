@@ -30,3 +30,6 @@ Offer, answer, ICE candidate, and hangup records are `CallSignal` values encrypt
 - [libsignal store protocols](https://github.com/signalapp/libsignal/blob/main/swift/Sources/LibSignalClient/DataStoreProtocols.swift)
 - [Signal-iOS Podfile pin](https://github.com/signalapp/Signal-iOS/blob/main/Podfile)
 - [libsignal repository and license](https://github.com/signalapp/libsignal)
+- [WebRTC native iOS relay policy API](https://webrtc.googlesource.com/src/+/21c80320caa5739b33d17ecc60ee4899e204b66e/sdk/objc/api/peerconnection/RTCConfiguration.h)
+- [Apple AVAudioSession](https://developer.apple.com/documentation/avfaudio/avaudiosession)
+- [Pinned WebRTC-lib podspec and BSD license declaration](https://raw.githubusercontent.com/stasel/WebRTC/master/WebRTC-lib.podspec)
