@@ -1,6 +1,19 @@
 import XCTest
 
 final class LockLifecycleTests: XCTestCase {
+    @MainActor private func declinePasswordStorageIfPresented(_ app: XCUIApplication) {
+        // On iOS 26 this remote system UI is exposed as an embedded Sheet,
+        // so XCTest's interruption monitor does not necessarily run for it.
+        let sheet = app.sheets["Save Password?"]
+        if sheet.waitForExistence(timeout: 2) {
+            XCTAssertTrue(sheet.buttons["Not Now"].isHittable)
+            sheet.buttons["Not Now"].tap()
+            let gone = NSPredicate(format: "exists == false")
+            expectation(for: gone, evaluatedWith: sheet)
+            waitForExpectations(timeout: 5)
+        }
+    }
+
     override func setUpWithError() throws {
         continueAfterFailure = false
         executionTimeAllowance = 240
@@ -28,6 +41,7 @@ final class LockLifecycleTests: XCTestCase {
         let repeatPassword = app.secureTextFields["Repeat password"]
         repeatPassword.tap(); repeatPassword.typeText(appPassword)
         create.tap()
+        declinePasswordStorageIfPresented(app)
         let compose = app.buttons["Compose"]
         XCTAssertTrue(compose.waitForExistence(timeout: 10), "App password creation must open Chats")
         compose.tap()
@@ -40,13 +54,16 @@ final class LockLifecycleTests: XCTestCase {
         let separate = app.secureTextFields["Separate chat password"]
         separate.tap(); separate.typeText(chatPassword)
         app.buttons["Create locked draft"].tap()
+        declinePasswordStorageIfPresented(app)
         let friend = app.staticTexts["Lifecycle test friend"].firstMatch
         XCTAssertTrue(friend.waitForExistence(timeout: 5), "Created local draft must appear in Chats")
         friend.tap()
+        declinePasswordStorageIfPresented(app)
         let chatField = app.secureTextFields["Chat password"]
         XCTAssertTrue(chatField.waitForExistence(timeout: 5), "Opening a chat must require its password")
         chatField.tap(); chatField.typeText(chatPassword)
         app.buttons["Unlock chat"].tap()
+        declinePasswordStorageIfPresented(app)
         // The unlock gate's dismiss action is named Close; seeing the
         // conversation-only Lock chat action proves the password transition
         // completed without exposing the chat before authentication.
@@ -59,11 +76,13 @@ final class LockLifecycleTests: XCTestCase {
 
         XCUIDevice.shared.press(.home)
         app.activate()
+        declinePasswordStorageIfPresented(app)
         let unlock = app.secureTextFields["App password"]
         XCTAssertTrue(unlock.waitForExistence(timeout: 10), "Returning from Home must require app password")
         XCTAssertFalse(app.staticTexts["Lifecycle test friend"].exists)
         unlock.tap(); unlock.typeText(appPassword)
         app.buttons["Unlock"].tap()
+        declinePasswordStorageIfPresented(app)
         // App unlock intentionally performs the vault KDF before the inbox can
         // render; allow the security work plus the SwiftUI transition to
         // complete instead of treating it as a lock bypass/failure.
