@@ -111,7 +111,8 @@ struct VoiceCallStatus: View {
     }
 
     func acceptIncoming() async {
-        guard hasIncomingOffer, let date = pendingOfferDate, fresh(date),
+        guard hasIncomingOffer else { return }
+        guard let date = pendingOfferDate, fresh(date),
               let pendingOffer, (try? pendingOffer.validate()) != nil, authorized() else {
             stop(sendHangup: false)
             return

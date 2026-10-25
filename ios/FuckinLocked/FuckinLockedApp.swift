@@ -754,10 +754,12 @@ private struct ConversationView: View {
                         status = ""
                     }
                 } catch SignalError.untrustedIdentity(_) {
+                    callController?.stop(sendHangup: false)
                     verified = false; identityMismatch = true
                     status = "Device identity changed. Messaging stopped. Compare identities with your friend before starting a new verified chat."
                     return
                 } catch SignalStoreError.identityChanged {
+                    callController?.stop(sendHangup: false)
                     verified = false; identityMismatch = true
                     status = "Device identity changed. Messaging stopped."
                     return

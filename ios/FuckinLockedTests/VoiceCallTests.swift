@@ -157,6 +157,9 @@ import XCTest
         c.consume([record()])
         let task = Task { await c.acceptIncoming() }
         await fulfillment(of: [entered], timeout: 2)
+        await c.acceptIncoming()
+        XCTAssertTrue(c.isActive, "A duplicate Accept tap must not cancel the pending setup")
+        XCTAssertEqual(f.fetched, 1)
         f.verified = false
         resume?.resume(returning: f.config)
         await task.value
