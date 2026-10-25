@@ -124,6 +124,7 @@ jobs:
             kill "$(cat "$RUNNER_TEMP/fuckin-locked-relay.pid")" || true
           fi
       - name: Build unsigned iPhone IPA artifact
+        if: always()
         run: |
           build_dir="$RUNNER_TEMP/fuckin-locked-iphone-build"
           xcodebuild build \
@@ -142,6 +143,7 @@ jobs:
             "$RUNNER_TEMP/fuckin-locked-ipa/Payload" \
             "$RUNNER_TEMP/fuckin-locked-unsigned.ipa"
       - name: Upload unsigned iPhone IPA artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: fuckin-locked-unsigned-ipa
