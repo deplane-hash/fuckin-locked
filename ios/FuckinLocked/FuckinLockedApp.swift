@@ -770,6 +770,7 @@ private struct ConversationView: View {
                     fingerprint = value; verified = false
                 } catch {
                     guard vault.chatGeneration == generation else { return }
+                    callController?.stop(sendHangup: false)
                     ownFingerprint = (try? messaging.ownFingerprint(for: id)) ?? ""
                     status = "Can't connect. Retrying while this chat is open."
                 }
