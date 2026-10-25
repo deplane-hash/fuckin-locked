@@ -43,19 +43,25 @@ def metadata_key() -> bytes:
 def turn_configuration() -> dict[str, str]:
     """Return a complete TURN-over-TLS config or fail closed.
 
-    Calls never advertise a partially configured or non-TLS relay. Credentials
-    are deployment-provided short-lived values and are not written to logs or
-    the database.
+    Uses coturn's documented TURN REST credentials. The shared secret remains
+    server-side; each authenticated fetch gets a five-minute credential.
     """
     url = os.environ.get("FL_TURN_URL", "")
-    username = os.environ.get("FL_TURN_USERNAME", "")
-    credential = os.environ.get("FL_TURN_CREDENTIAL", "")
+    shared = os.environ.get("FL_TURN_SHARED_SECRET", "")
     # TURN URIs use the `turns:host:port` form, which Python's URL parser
     # treats as an opaque path unless an authority prefix is supplied.
-    authority = url[6:].split("?", 1)[0] if url.lower().startswith("turns:") else ""
-    parsed = urlparse("//" + authority)
-    require(url.lower().startswith("turns:") and parsed.hostname and username and credential,
+    try:
+        parsed = urlparse("https://" + url[6:])
+        valid = (url.lower().startswith("turns:") and parsed.hostname and
+                 parsed.username is None and parsed.password is None and
+                 not parsed.path and not parsed.fragment and parsed.query == "transport=tcp" and
+                 (parsed.port is None or 0 < parsed.port <= 65535))
+    except ValueError:
+        valid = False
+    require(valid and len(shared.encode()) >= 32 and not shared.startswith("REPLACE_"),
             503, "Calls unavailable")
+    username = f"{int(time.time()) + 300}:{secrets.token_urlsafe(18)}"
+    credential = base64.b64encode(hmac.new(shared.encode(), username.encode(), hashlib.sha1).digest()).decode()
     return {"url": url, "username": username, "credential": credential}
 
 

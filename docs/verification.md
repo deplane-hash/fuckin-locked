@@ -21,8 +21,18 @@
   protocol/vault suite, but lifecycle verification timed out with an incomplete
   result bundle. The lifecycle job now uses a fresh simulator and propagates
   failures without continue-on-error. A timeout is never a pass.
-- Server suite rerun locally: 21 tests passed. Physical iPhone call audio,
+- Server suite rerun locally: 22 tests passed, including fresh expiring coturn
+  REST credentials, malformed TURN URLs, and credential confidentiality.
+  Prepared `deploy/coturn.conf.example` and `docs/calls-setup.md`; not deployed.
+  Physical iPhone call audio,
   TURN deployment, capture/snapshot timing, and signing remain unverified.
+- Run 40152892461 passed all 28 protocol/vault/coordinator tests. Its UI
+  activity log showed chat-password and Unlock taps with hit point {-1,-1}
+  while the keyboard covered the non-scrollable password form. PasswordLayout
+  now scrolls within the keyboard-safe area. Initial privacy-cover attachment
+  no longer publishes vault changes inside a SwiftUI render; actual inactive
+  notifications still cover and lock synchronously. These UI changes require
+  the next workflow result.
 
 ## Current milestone status (supersedes historical notes below)
 

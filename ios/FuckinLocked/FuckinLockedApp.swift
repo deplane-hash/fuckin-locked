@@ -118,16 +118,21 @@ private struct PasswordLayout<Content: View>: View {
     let subtitle: String
     let content: Content
     var body: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            Image(systemName: "lock").font(.system(size: 36, weight: .light)).foregroundStyle(Palette.lime)
-                .accessibilityHidden(true)
-            Text(title).font(.largeTitle.bold()).foregroundStyle(Palette.text)
-            Text(subtitle).font(.subheadline).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
-            content
-            Spacer()
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 24) {
+                    Image(systemName: "lock").font(.system(size: 36, weight: .light)).foregroundStyle(Palette.lime)
+                        .accessibilityHidden(true)
+                    Text(title).font(.largeTitle.bold()).foregroundStyle(Palette.text)
+                    Text(subtitle).font(.subheadline).foregroundStyle(Palette.muted).multilineTextAlignment(.center)
+                    content
+                }
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: max(0, geometry.size.height - 52))
+                .padding(26)
+            }
+            .scrollDismissesKeyboard(.interactively)
         }
-        .padding(26)
     }
 }
 

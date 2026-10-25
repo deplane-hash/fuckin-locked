@@ -1,4 +1,6 @@
 import base64
+import hashlib
+import hmac
 import os
 import sqlite3
 import tempfile
@@ -35,6 +37,26 @@ def sample_bundle(identity=None):
 
 
 class RelayTests(unittest.TestCase):
+    def test_turn_credentials_expire_rotate_and_never_expose_shared_secret(self):
+        shared = "fixture-shared-secret-with-at-least-32-bytes"
+        with patch.dict(os.environ, {"FL_TURN_URL": "turns:freedomhub.at:5349?transport=tcp",
+                                     "FL_TURN_SHARED_SECRET": shared}), patch.object(service.time, "time", return_value=1700000000):
+            first = service.turn_configuration()
+            second = service.turn_configuration()
+            self.assertEqual(first["username"].split(":", 1)[0], "1700000300")
+            self.assertNotEqual(first["username"], second["username"])
+            expected = base64.b64encode(hmac.new(shared.encode(), first["username"].encode(), hashlib.sha1).digest()).decode()
+            self.assertEqual(first["credential"], expected)
+            self.assertNotIn(shared, json.dumps(first))
+            for invalid in ("turn:freedomhub.at:3478?transport=tcp", "turns:freedomhub.at:5349?transport=udp",
+                            "turns:user:password@freedomhub.at:5349?transport=tcp",
+                            "turns:freedomhub.at:not-a-port?transport=tcp", "turns:[]?transport=tcp",
+                            "turns:freedomhub.at/path?transport=tcp"):
+                with patch.dict(os.environ, {"FL_TURN_URL": invalid}):
+                    with self.assertRaises(service.Error): service.turn_configuration()
+            with patch.dict(os.environ, {"FL_TURN_SHARED_SECRET": "short"}):
+                with self.assertRaises(service.Error): service.turn_configuration()
+
     def group_fixture(self):
         friends = []
         for username in ("groupbob", "groupcharlie"):
@@ -120,17 +142,17 @@ class RelayTests(unittest.TestCase):
                          f"/v1/rooms/{room}/envelopes/pending"]:
                 self.assertEqual(request(path)[0], 200, path)
                 self.assertEqual(request(path, authenticated=False)[0], 401, path)
-            with patch.dict(os.environ, {"FL_TURN_URL": "", "FL_TURN_USERNAME": "", "FL_TURN_CREDENTIAL": ""}):
+            with patch.dict(os.environ, {"FL_TURN_URL": "", "FL_TURN_SHARED_SECRET": ""}):
                 self.assertNotIn("encrypted_calls_v1", request("/v1/capabilities")[1]["capabilities"])
                 self.assertEqual(request("/v1/calls/turn")[0], 503)
                 self.assertEqual(request("/v1/calls/turn", authenticated=False)[0], 401)
             with patch.dict(os.environ, {"FL_TURN_URL": "turns:freedomhub.at:5349?transport=tcp",
-                                         "FL_TURN_USERNAME": "short-lived-user",
-                                         "FL_TURN_CREDENTIAL": "short-lived-credential"}):
+                                         "FL_TURN_SHARED_SECRET": "fixture-shared-secret-with-at-least-32-bytes"}):
                 self.assertIn("encrypted_calls_v1", request("/v1/capabilities")[1]["capabilities"])
                 status, turn = request("/v1/calls/turn")
                 self.assertEqual(status, 200)
                 self.assertEqual(turn["url"], "turns:freedomhub.at:5349?transport=tcp")
+                self.assertEqual(request("/v1/calls/turn", authenticated=False)[0], 401)
             self.assertEqual(request(f"/v1/rooms/{room}/prekeys/{friend['device_id']}/request-one")[0], 200)
             status, result = request("/v1/envelopes", "POST", {
                 "room_id": room, "recipient_device": friend["device_id"], "kind": "message",

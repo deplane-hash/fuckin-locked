@@ -65,7 +65,17 @@ struct NativePrivacyShield: UIViewRepresentable {
                 self?.window?.makeKey()
             }
         })
-        if scene.activationState != .foregroundActive { conceal() }
+        if scene.activationState != .foregroundActive {
+            // Attaching a representable can happen during a SwiftUI render.
+            // Cover immediately, then handle initial inactive state outside
+            // that render. Real inactive notifications still lock synchronously.
+            cover.isHidden = false
+            window?.rootViewController?.view.accessibilityElementsHidden = true
+            DispatchQueue.main.async { [weak self, weak scene] in
+                guard scene?.activationState != .foregroundActive else { return }
+                self?.onInactive?()
+            }
+        }
     }
 
     private func conceal() {
