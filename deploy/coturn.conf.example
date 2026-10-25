@@ -1,0 +1,37 @@
+# Preparation only. Replace every REPLACE_ value before installing.
+realm=turn.freedomhub.at
+server-name=turn.freedomhub.at
+tls-listening-port=5349
+listening-ip=REPLACE_WITH_SERVER_INTERFACE_IP
+relay-ip=REPLACE_WITH_SERVER_INTERFACE_IP
+# If behind NAT, also set external-ip=PUBLIC_IP/PRIVATE_IP.
+use-auth-secret
+static-auth-secret=REPLACE_WITH_SAME_RANDOM_SECRET_AS_FL_TURN_SHARED_SECRET
+cert=REPLACE_WITH_READABLE_FULLCHAIN_PEM_PATH
+pkey=REPLACE_WITH_READABLE_PRIVATE_KEY_PEM_PATH
+no-tlsv1
+no-tlsv1_1
+no-udp
+no-tcp
+no-dtls
+# Client control traffic uses TLS/TCP; relay allocations use UDP.
+no-tcp-relay
+min-port=49160
+max-port=49200
+user-quota=4
+total-quota=100
+no-cli
+no-multicast-peers
+denied-peer-ip=0.0.0.0-0.255.255.255
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+denied-peer-ip=::1
+denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+# Do not enable verbose logs or record client credentials.
+log-file=/dev/null
+simple-log
+no-stdout-log

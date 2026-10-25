@@ -11,6 +11,7 @@ settings:
     INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
     INFOPLIST_KEY_UILaunchScreen_Generation: YES
     INFOPLIST_KEY_FLGatewayURL: "$(FL_GATEWAY_URL)"
+    INFOPLIST_KEY_FLTURNHost: "$(FL_TURN_HOST)"
     INFOPLIST_KEY_UIFileSharingEnabled: NO
     INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: NO
     CODE_SIGN_STYLE: Automatic
@@ -22,9 +23,24 @@ settings:
     SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited)"
     GCC_PREPROCESSOR_DEFINITIONS: "$(inherited)"
     INFOPLIST_KEY_UIRequiresFullScreen: YES
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "1"
+    INFOPLIST_KEY_CFBundleShortVersionString: "$(MARKETING_VERSION)"
+    INFOPLIST_KEY_CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
 configFiles:
   Debug: Config.xcconfig
   Release: Config.xcconfig
+schemes:
+  FuckinLockedRelayTests:
+    build:
+      targets:
+        FuckinLocked: all
+    test:
+      targets:
+        - FuckinLockedTests
+        - FuckinLockedUITests
+      environmentVariables:
+        FL_RUN_RELAY_INTEGRATION: "1"
 targets:
   FuckinLocked:
     type: application
@@ -37,8 +53,10 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.example.fuckinlocked
+        "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]": SimulatorTests.entitlements
         INFOPLIST_KEY_CFBundleDisplayName: "Fuckin Locked"
         INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: NO
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Microphone access is required for encrypted voice calls."
   FuckinLockedTests:
     type: bundle.unit-test
     platform: iOS
@@ -49,3 +67,14 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.example.fuckinlocked.tests
+  FuckinLockedUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: FuckinLockedUITests
+    dependencies:
+      - target: FuckinLocked
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.example.fuckinlocked.uitests
+        TEST_TARGET_NAME: FuckinLocked

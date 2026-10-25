@@ -18,6 +18,8 @@ private func makeGatewaySession() -> URLSession {
     configuration.urlCache = nil
     configuration.httpShouldSetCookies = false
     configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+    configuration.timeoutIntervalForRequest = 15
+    configuration.timeoutIntervalForResource = 30
     return URLSession(configuration: configuration, delegate: NoRedirects(), delegateQueue: nil)
 }
 
@@ -28,6 +30,12 @@ struct Admission: Decodable {
     let state: String
 }
 struct BootstrapResult: Decodable { let user_id: String; let device_id: String }
+struct AccountProfile: Decodable {
+    let user_id: String
+    let device_id: String
+    let name: String
+    let username: String
+}
 
 struct Challenge: Decodable { let challenge: String }
 struct SessionToken: Decodable { let token: String }
@@ -41,6 +49,24 @@ struct DevicesResponse: Decodable { let devices: [DeviceInfo] }
 struct RoomCreated: Decodable { let room_id: String }
 struct RoomDevice: Decodable { let id: String; let user_id: String }
 struct RoomDevices: Decodable { let devices: [RoomDevice] }
+struct CallTURN: Decodable {
+    let url: String
+    let username: String
+    let credential: String
+
+    func validateRoute(expectedHost: String) throws {
+        guard !expectedHost.isEmpty, !expectedHost.contains("REPLACE_"),
+              url.lowercased().hasPrefix("turns:"),
+              let parsed = URLComponents(string: "https://" + String(url.dropFirst(6))),
+              parsed.host?.lowercased() == expectedHost.lowercased(),
+              parsed.user == nil, parsed.password == nil, parsed.path.isEmpty,
+              parsed.fragment == nil, parsed.query == "transport=tcp",
+              parsed.port == nil || (1...65535).contains(parsed.port!),
+              !username.isEmpty, !credential.isEmpty else {
+            throw ConnectionError.unavailable
+        }
+    }
+}
 struct RoomMember: Decodable, Identifiable {
     let id: String
     let name: String
@@ -49,6 +75,7 @@ struct RoomMember: Decodable, Identifiable {
 struct RoomInfo: Decodable, Identifiable {
     let id: String
     let members: [RoomMember]
+    let is_group: Bool?
 }
 struct RoomsResponse: Decodable { let rooms: [RoomInfo] }
 struct RelayEnvelope: Codable {
@@ -80,14 +107,17 @@ struct RelayPrekeyBundle: Codable {
     @Published private(set) var connected = false
     private let baseOverride: URL?
     private let identityAccount: String
+    private let diagnostics: ((Int) -> Void)?
     private var token: String?
     private var generation = 0
     private var session = makeGatewaySession()
 
     init(baseURL: URL? = nil, session: URLSession? = nil,
-         identityAccount: String = DeviceIdentity.defaultAccount) {
+         identityAccount: String = DeviceIdentity.defaultAccount,
+         diagnostics: ((Int) -> Void)? = nil) {
         baseOverride = baseURL
         self.identityAccount = identityAccount
+        self.diagnostics = diagnostics
         if let session { self.session = session }
     }
 
@@ -128,6 +158,7 @@ struct RelayPrekeyBundle: Codable {
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         do {
             let (data, response) = try await session.data(for: request)
+            diagnostics?((response as? HTTPURLResponse)?.statusCode ?? -1)
             guard started == generation else { throw ConnectionError.unavailable }
             guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
                 throw ConnectionError.unavailable
@@ -135,6 +166,7 @@ struct RelayPrekeyBundle: Codable {
             connected = true
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
+            diagnostics?((error as NSError).code)
             if started == generation { connected = false }
             throw ConnectionError.unavailable
         }
@@ -165,12 +197,14 @@ struct RelayPrekeyBundle: Codable {
         ])
         do {
             let (data, response) = try await session.data(for: request)
+            diagnostics?((response as? HTTPURLResponse)?.statusCode ?? -1)
             guard started == generation else { throw ConnectionError.unavailable }
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw ConnectionError.unavailable }
             let result = try JSONDecoder().decode(BootstrapResult.self, from: data)
             connected = true
             return result
         } catch {
+            diagnostics?((error as NSError).code)
             if started == generation { connected = false }
             throw ConnectionError.unavailable
         }
@@ -195,6 +229,44 @@ struct RelayPrekeyBundle: Codable {
         guard token != nil else { throw ConnectionError.unavailable }
         let result: PeopleResponse = try await request("/v1/people")
         return result.people
+    }
+
+    func requireMessagingCapabilities() async throws {
+        let result: [String: [String]] = try await request("/v1/capabilities")
+        let required: Set<String> = ["idempotent_envelopes_v1", "delivery_status_v1", "room_inbox_v1", "idempotent_prekeys_v1"]
+        guard required.isSubset(of: Set(result["capabilities"] ?? [])) else {
+            throw ConnectionError.unavailable
+        }
+    }
+
+    func requireCallCapabilities() async throws {
+        let result: [String: [String]] = try await request("/v1/capabilities")
+        guard result["capabilities"]?.contains("encrypted_calls_v1") == true else {
+            throw ConnectionError.unavailable
+        }
+    }
+
+    func accountProfile() async throws -> AccountProfile {
+        try await request("/v1/me")
+    }
+
+    func requestDevice(publicKey: String) async throws -> String {
+        guard let key = Data(base64Encoded: publicKey), key.count == 32 else {
+            throw ConnectionError.invalidResponse
+        }
+        let result: [String: String] = try await request("/v1/devices/pending", method: "POST",
+                                                       body: ["public_key": publicKey])
+        guard let id = result["device_id"] else { throw ConnectionError.invalidResponse }
+        return try routeID(id)
+    }
+
+    func approveDevice(_ id: String) async throws {
+        let _: [String: String] = try await request("/v1/devices/\(try routeID(id))/approve",
+                                                    method: "POST", body: [:])
+    }
+
+    func pairingPublicKey() throws -> String {
+        try DeviceIdentity.getOrCreate(account: identityAccount).publicKey.rawRepresentation.base64EncodedString()
     }
 
     func pendingAdmissions() async throws -> [PendingAdmission] {
@@ -258,6 +330,43 @@ struct RelayPrekeyBundle: Codable {
         return result.devices
     }
 
+    func memberDevices(_ userID: String) async throws -> [RoomDevice] {
+        let result: RoomDevices = try await request("/v1/people/\(try routeID(userID))/devices")
+        return result.devices
+    }
+
+    func createGroup(peerDevices: [String]) async throws -> String {
+        let peers = try peerDevices.map { try routeID($0) }
+        let result: RoomCreated = try await request("/v1/groups", method: "POST", body: ["peer_devices": peers])
+        return try routeID(result.room_id)
+    }
+
+    func groupInfo(_ id: String) async throws -> GroupInfo {
+        try await request("/v1/groups/\(try routeID(id))")
+    }
+
+    func groupLink(_ id: String, peerDevice: String) async throws -> String {
+        let result: RoomCreated = try await request("/v1/groups/\(try routeID(id))/links/\(try routeID(peerDevice))",
+                                                    method: "POST", body: [:])
+        return try routeID(result.room_id)
+    }
+
+    func removeGroupMember(_ id: String, userID: String) async throws {
+        let _: [String: String] = try await request("/v1/groups/\(try routeID(id))/members/\(try routeID(userID))/remove",
+                                                    method: "POST", body: [:])
+    }
+
+    func callTURN() async throws -> CallTURN {
+        let turn: CallTURN = try await request("/v1/calls/turn")
+        // Media uses one separately pinned operator-owned host. An HTTP CDN
+        // in front of the HTTPS gateway cannot carry TURN on port 5349.
+        guard let expectedHost = Bundle.main.object(forInfoDictionaryKey: "FLTURNHost") as? String else {
+            throw ConnectionError.unavailable
+        }
+        try turn.validateRoute(expectedHost: expectedHost)
+        return turn
+    }
+
     func publishPrekeys(_ bundle: SignalPublicBundle, roomID: String) async throws {
         guard token != nil else { throw ConnectionError.unavailable }
         let room = try routeID(roomID)
@@ -265,33 +374,45 @@ struct RelayPrekeyBundle: Codable {
                                                     method: "POST", body: bundle.requestBody)
     }
 
-    func takePrekeys(roomID: String, deviceID: String) async throws -> RelayPrekeyBundle {
+    func takePrekeys(roomID: String, deviceID: String, requestID: UUID? = nil) async throws -> RelayPrekeyBundle {
         guard token != nil else { throw ConnectionError.unavailable }
         let room = try routeID(roomID)
         let device = try routeID(deviceID)
-        return try await request("/v1/rooms/\(room)/prekeys/\(device)")
+        let suffix = requestID.map { "/\($0.uuidString)" } ?? ""
+        return try await request("/v1/rooms/\(room)/prekeys/\(device)\(suffix)")
     }
 
     func sendEnvelope(roomID: String, recipientDevice: String, kind: String,
-                      ciphertext: Data) async throws -> String {
+                      ciphertext: Data, messageID: String? = nil) async throws -> String {
         guard token != nil else { throw ConnectionError.unavailable }
         let room = try routeID(roomID)
         let recipient = try routeID(recipientDevice)
         guard ["message", "attachment", "key_update"].contains(kind) else {
             throw ConnectionError.invalidResponse
         }
-        let result: [String: String] = try await request("/v1/envelopes", method: "POST", body: [
+        var body: [String: Any] = [
             "room_id": room, "recipient_device": recipient, "kind": kind,
             "ciphertext": ciphertext.base64EncodedString()
-        ])
+        ]
+        if let messageID { body["message_id"] = try routeID(messageID) }
+        let result: [String: String] = try await request("/v1/envelopes", method: "POST", body: body)
         guard let id = result["id"] else { throw ConnectionError.invalidResponse }
         return try routeID(id)
     }
 
-    func pendingEnvelopes() async throws -> [RelayEnvelope] {
+    func pendingEnvelopes(roomID: String? = nil) async throws -> [RelayEnvelope] {
         guard token != nil else { throw ConnectionError.unavailable }
-        let result: RelayEnvelopes = try await request("/v1/envelopes")
+        let path = try roomID.map { "/v1/rooms/\(try routeID($0))/envelopes/pending" } ?? "/v1/envelopes"
+        let result: RelayEnvelopes = try await request(path)
         return result.envelopes
+    }
+
+    func envelopeStatus(_ id: String) async throws -> String {
+        let result: [String: String] = try await request("/v1/envelopes/\(try routeID(id))/status")
+        guard let state = result["state"], ["accepted", "delivered"].contains(state) else {
+            throw ConnectionError.invalidResponse
+        }
+        return state
     }
 
     func acknowledgeEnvelope(_ id: String) async throws {
@@ -309,11 +430,18 @@ struct RelayPrekeyBundle: Codable {
     }
 }
 
+enum DeviceIdentityError: Error {
+    case keychain(OSStatus)
+    case corrupt
+}
+
 enum DeviceIdentity {
     static let defaultAccount = "device-signing-key"
 
     static func getOrCreate(account: String = defaultAccount) throws -> Curve25519.Signing.PrivateKey {
-        if let existing = try? load(account: account) { return existing }
+        do { return try load(account: account) }
+        catch DeviceIdentityError.keychain(errSecItemNotFound) {}
+        // A locked/unavailable Keychain is not permission to replace an identity.
         let created = Curve25519.Signing.PrivateKey()
         try save(created, account: account)
         return created
@@ -327,7 +455,8 @@ enum DeviceIdentity {
         var attributes = query
         attributes[kSecValueData as String] = key.rawRepresentation
         attributes[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        guard SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess else { throw ConnectionError.unavailable }
+        let status = SecItemAdd(attributes as CFDictionary, nil)
+        guard status == errSecSuccess else { throw DeviceIdentityError.keychain(status) }
     }
 
     static func load(account: String = defaultAccount) throws -> Curve25519.Signing.PrivateKey {
@@ -337,8 +466,9 @@ enum DeviceIdentity {
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne]
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data else { throw ConnectionError.unavailable }
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess else { throw DeviceIdentityError.keychain(status) }
+        guard let data = item as? Data else { throw DeviceIdentityError.corrupt }
         return try Curve25519.Signing.PrivateKey(rawRepresentation: data)
     }
 }

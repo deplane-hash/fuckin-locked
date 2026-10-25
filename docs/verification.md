@@ -1,4 +1,143 @@
-# Verification report — 2026-10-24
+# Verification report — 2026-10-25
+
+## Latest verified build
+
+- [Run 40190714250](https://github.com/deplane-hash/fuckin-locked/actions/runs/40190714250)
+  passed at source revision `a95a30c5820a5d3f71f2370c82cef13e14bcacab`:
+  **30 core simulator tests, 1 lifecycle UI test, zero failures**. The unsigned
+  Release iPhone IPA also built and uploaded successfully. Signing was skipped.
+- The UI test exercised password setup, explicit local-draft creation, chat
+  password entry, compact composer sizing, Home/background return requiring
+  the app password, chat relocking, and termination/relaunch requiring the
+  app password. It declined only the known iOS password-saving sheet and
+  retried navigation when that sheet consumed a row tap. It used no vault
+  bypass or pre-authenticated test state.
+- Core cases include encrypted vault and password rewrapping, persistent
+  failure delays, libsignal two-client HTTPS delivery, abandoned-call outbox
+  rejection, call consent/identity/lock races, native privacy-cover events,
+  expired call commands, and pinned TURN-host rejection.
+- The separately executed Python server suite passed **22 tests**. The live
+  gateway health/auth checks returned 200 and 401 respectively; these do not
+  verify authenticated live messaging or call media.
+- [Unsigned IPA artifact](https://github.com/deplane-hash/fuckin-locked/actions/runs/40190714250/artifacts/12597951767).
+  GitHub wraps the IPA in an artifact ZIP. Device installation requires signing.
+- Not performed: live TURN/DNS deployment, two physical iPhone audio/message
+  checks, physical capture/snapshot timing, APNs setup, or independent security
+  review. `turn.freedomhub.at` is prepared in configuration but not provisioned.
+  Calls remain absent from bottom navigation. Push/background delivery and
+  animated/general attachment or pack importing are still unfinished.
+
+## Implemented corrections and earlier diagnostics
+
+- Run 40156246173 passed all 30 core simulator tests, including the native
+  privacy-cover notification regression and pinned TURN-host rejection cases.
+  Its lifecycle test passed chat unlock and the compact composer check, then
+  failed at app-password entry after backgrounding. The saved screen recording
+  shows an iOS "Save Password?" dialog blocking that field. Explicit password
+  AutoFill/save hints have now been removed from app password fields; the UI
+  test declines only that known system prompt if iOS heuristics still show it.
+  The later successful run above supersedes that failure. No claim is made that an app can
+  prevent a user from manually storing a password in another password manager.
+
+- Incoming calls now require explicit Accept before network/media construction.
+  Both directions check verified identity, unlocked chat, app activity, and an
+  operation generation across asynchronous setup. Every vault lock stops the
+  call synchronously, including screenshots, recording, and password changes.
+- Media failures disable the track, close the connection, clear candidate
+  buffers, and deactivate audio. Outbound signaling is serialized; SDP precedes
+  ICE. Call signaling no longer enters the durable message retry outbox and
+  carries an encrypted expiration. Legacy call history remains decodable but
+  cannot trigger calls.
+- Added coordinator tests for consent, rejection, identity changes, synchronous
+  locks, delayed completions, failed media setup, and matching hangups. Added an
+  HTTPS integration regression for abandoned offline calls and expiry tests.
+  These checks passed in the latest verified run above.
+- Corrected the UIKit composer's vertical sizing and duplicate local-draft
+  notice. Local drafts remain explicitly separate from recipient-bound chats.
+- Previous run 40149937507 built the unsigned device IPA and passed the
+  protocol/vault suite, but lifecycle verification timed out with an incomplete
+  result bundle. The lifecycle job now uses a fresh simulator and propagates
+  failures without continue-on-error. A timeout is never a pass.
+- Server suite rerun locally: 22 tests passed, including fresh expiring coturn
+  REST credentials, malformed TURN URLs, and credential confidentiality.
+  Prepared `deploy/coturn.conf.example` and `docs/calls-setup.md`; not deployed.
+  Physical iPhone call audio,
+  TURN deployment, capture/snapshot timing, and signing remain unverified.
+- Run 40152892461 passed all 28 protocol/vault/coordinator tests. Its UI
+  activity log showed chat-password and Unlock taps with hit point {-1,-1}
+  while the keyboard covered the non-scrollable password form. PasswordLayout
+  now scrolls within the keyboard-safe area. Initial privacy-cover attachment
+  no longer publishes vault changes inside a SwiftUI render; actual inactive
+  notifications still cover and lock synchronously. The latest workflow above
+  validates the corrected simulator UI path.
+
+## Current milestone status (supersedes historical notes below)
+
+- The voice-call transport is now implemented in source: authenticated call
+  signaling is carried as libsignal ciphertext, WebRTC is configured with
+  relay-only ICE and a separately pinned `turns:` hostname on the same server, and calls stop on inactive
+  transitions. The server advertises `encrypted_calls_v1` only with a complete
+  TURN-over-TLS configuration and never exposes the route without an active
+  session. Calls remain omitted from bottom navigation.
+- Server suite currently passes **22 tests**, including authenticated TURN
+  capability gating, invalid/absent TURN configuration, opaque envelope
+  storage, revocation, and invitation races.
+- Xcode run `40144712171` compiled the WebRTC/libsignal integration and passed
+  the full protocol/vault simulator suite, including the call-signal ciphertext
+  assertion. Its lifecycle UI test failed only on the local-draft status lookup;
+  run `40145403938` reruns that test using the explicit accessibility identifier.
+- A physical two-iPhone test is still required for microphone permission,
+  TURN certificate/credential rotation, DTLS-SRTP audio, background teardown,
+  capture behavior, and call interruption. The call path is not production-ready
+  or independently reviewed.
+
+- The local relay suite now has **18 passing tests**, including actual HTTP route
+  dispatch/auth, stable ciphertext upload IDs/conflict detection, sender-only
+  delivery status, expiring device approval and recoverable requester-scoped
+  prekey claims. No production database or live accounts are used by these tests.
+- Expanded Xcode runs `40129471328` and `40130411164` compiled the app but failed
+  the explicitly enabled relay integration test with a connection error. This
+  corrects the earlier assumption that a successful build proved that integration
+  test ran: setting a shell variable alone did not establish test-runner activation.
+- The CI-only scheme now passes the fixture enable flag directly to the test
+  runner. Results are preserved as an `.xcresult` and include failure summaries.
+- Run `40131001883` found a new compose-view catch-variable compile error; that
+  error is fixed in the working source. The newest rerun must be checked before
+  calling this source a buildable or verified beta.
+- Run `40131445830` compiled and ran **19 simulator tests: 18 passed, 1 failed,
+  0 skipped**. The passing cases include the real UI background/relaunch test,
+  vault/password-failure/atomic-write tests, and the libsignal store round trip.
+  The HTTPS fixture health request succeeds; integration stops at the first
+  device's Keychain identity creation before a bootstrap POST reaches the server.
+  The next revision uses ad-hoc simulator signing with explicit simulator-only
+  Keychain entitlements and reports safe OSStatus codes. Device builds do not use
+  the simulator entitlement file. This correction still requires a successful run.
+- Run `40132216165` validates that correction: **the two-client HTTPS/libsignal
+  integration test passed**, including invitation → approval → device binding →
+  both password gates → text/reaction/image delivery → offline queue reopening →
+  additional-device approval → session revocation and no silent forwarding.
+  All 18 non-UI cases passed; the one lifecycle UI case failed an assertion in
+  that run. Earlier unsigned simulator run `40131445830` passed that UI case.
+  The test is now isolated, time bounded and given descriptive assertion messages;
+  its exact prior source location is being extracted before a beta is verified.
+- A restricted native composer and third-party keyboard policy have been added
+  to close default Copy/Cut/drag/Writing Tools paths. Their new tests require the
+  next Xcode run. Public pairing keys remain selectable by design.
+- Added source/tests: persisted encrypted outbox; distinct Sent/Delivered states;
+  images/reactions; original stickers and encrypted preferences; explicit device
+  linking; synchronous native inactive cover; scene-local capture observation;
+  generation checks rejecting stale async completions; password-wrapper failure
+  recovery; and real simulator background/relaunch UI coverage. New tests are not
+  reported as passed until the matching Xcode run succeeds.
+- No new source in this milestone has been installed on physical iPhones. Live
+  two-device E2E, screenshots/recording/mirroring, snapshot timing, backup behavior
+  and full accessibility checks remain unverified. See `device-checks.md`.
+- Source changes are not automatically deployed to the live relay. The new client
+  requires matching authenticated relay capabilities and fails closed on an older
+  service. The prior signing failure requires valid matching repository secrets.
+
+The following sections record earlier results and limitations for traceability;
+their old feature counts and pending-work descriptions are historical.
 
 ## Executed in this environment
 

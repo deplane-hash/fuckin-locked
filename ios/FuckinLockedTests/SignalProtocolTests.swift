@@ -51,5 +51,15 @@ import LibSignalClient
                                                to: aliceAddress, sessionStore: alice,
                                                identityStore: alice, context: NullContext())
         XCTAssertEqual(String(data: replyPlaintext, encoding: .utf8), "hello from bob")
+
+        let call = CallSignal(callID: UUID(), kind: "offer",
+                              body: Data("private-sdp-fingerprint".utf8))
+        let callContent = MessageContent(id: UUID(), text: "", callSignal: call)
+        try callContent.validate()
+        let callCiphertext = try signalEncrypt(message: JSONEncoder().encode(callContent),
+                                                for: bobAddress, localAddress: aliceAddress,
+                                                sessionStore: alice, identityStore: alice,
+                                                context: NullContext()).serialize()
+        XCTAssertFalse(String(decoding: callCiphertext, as: UTF8.self).contains("private-sdp-fingerprint"))
     }
 }
