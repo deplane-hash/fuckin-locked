@@ -98,6 +98,17 @@ jobs:
             -test-timeouts-enabled YES \
             -maximum-test-execution-time-allowance 300 \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- -quiet
+      - name: Package Appetize simulator app
+        run: |
+          simulator_app="$RUNNER_TEMP/fuckin-locked-simulator-build/Build/Products/Debug-iphonesimulator/FuckinLocked.app"
+          test -d "$simulator_app"
+          ditto -c -k --sequesterRsrc --keepParent "$simulator_app" "$RUNNER_TEMP/FuckinLocked-simulator.app.zip"
+      - name: Upload Appetize simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuckin-locked-appetize-simulator
+          path: ${{ runner.temp }}/FuckinLocked-simulator.app.zip
+          if-no-files-found: error
       - name: Upload simulator test results
         if: always()
         uses: actions/upload-artifact@v4
