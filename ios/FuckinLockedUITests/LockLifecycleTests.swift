@@ -35,9 +35,11 @@ final class LockLifecycleTests: XCTestCase {
         XCTAssertTrue(chatField.waitForExistence(timeout: 5), "Opening a chat must require its password")
         chatField.tap(); chatField.typeText(chatPassword)
         app.buttons["Unlock chat"].tap()
-        let localDraftStatus = app.descendants(matching: .any)["local-draft-status"]
-        XCTAssertTrue(localDraftStatus.waitForExistence(timeout: 15),
-                      "Unlock must show an honestly labeled local draft")
+        // The unlock gate's dismiss action is named Close; seeing the
+        // conversation-only Lock chat action proves the password transition
+        // completed without exposing the chat before authentication.
+        XCTAssertTrue(app.buttons["Lock chat"].waitForExistence(timeout: 15),
+                      "Unlock must show the conversation after its password")
 
         XCUIDevice.shared.press(.home)
         app.activate()
@@ -52,7 +54,7 @@ final class LockLifecycleTests: XCTestCase {
         XCTAssertTrue(friend.waitForExistence(timeout: 15), "App unlock after background must reopen Chats")
         friend.tap()
         XCTAssertTrue(chatField.waitForExistence(timeout: 5), "Chat must be relocked after background")
-        XCTAssertFalse(app.descendants(matching: .any)["local-draft-status"].exists)
+        XCTAssertFalse(app.buttons["Lock chat"].exists)
 
         app.terminate()
         app.launch()

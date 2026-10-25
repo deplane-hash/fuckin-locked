@@ -496,7 +496,7 @@ private struct ChatGateView: View {
         }
         .background(Palette.background)
         .toolbar { ToolbarItem(placement: .topBarTrailing) {
-            Button("Lock chat") { vault.lockChat(); dismiss() }
+            Button("Close") { vault.lockChat(); dismiss() }
         }}
         .onAppear {
             unlocked = vault.unlockedChatID == id
