@@ -1,3 +1,6 @@
 // The app-level relay route is on the existing FreedomHub HTTPS origin.
 // There is no direct-relay fallback if this route is unavailable.
 FL_GATEWAY_URL = https:/$()/freedomhub.at/fuckin-locked/
+// Prepared DNS-only media hostname on the same operator's server. DNS/TLS
+// deployment is required before calls work; it is not a fallback route.
+FL_TURN_HOST = turn.freedomhub.at

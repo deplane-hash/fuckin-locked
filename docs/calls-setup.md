@@ -2,9 +2,17 @@
 
 These are prepared deployment instructions; no live server was changed.
 
-1. Install a maintained coturn release on the same server as `freedomhub.at`.
+1. The prepared media hostname is `turn.freedomhub.at`, pinned in the iOS build
+   with `FL_TURN_HOST`. It is not provisioned yet. Create a DNS-only A record
+   pointing it to the supplied server address `62.171.165.206` after deployment
+   authorization. Keep the existing website's DNS/proxy settings unchanged.
+   The main `freedomhub.at` record is Cloudflare-proxied; ordinary HTTP proxying
+   cannot carry TURN on port 5349. Use this dedicated DNS-only hostname.
+   Install a maintained coturn release on the same server as `freedomhub.at`.
    Use `deploy/coturn.conf.example`, replacing the interface IP and certificate
-   paths. Its TLS certificate must validate for `freedomhub.at`. If the host is
+   paths. Its public CA TLS certificate must validate for `turn.freedomhub.at`.
+   An iOS signing certificate or a Cloudflare Origin CA certificate does not
+   replace the public CA certificate required by the native TURN client. If the host is
    behind NAT, configure coturn's external/public address mapping as documented
    by coturn. DNS must reach the TURN host directly; an HTTP reverse proxy does
    not carry TURN. Keep the existing HTTPS gateway on port 443.
@@ -13,7 +21,7 @@ These are prepared deployment instructions; no live server was changed.
    coturn's protected `static-auth-secret`. Do not put it in the iOS build,
    GitHub source, commands retained in shell history, or logs. Restrict both
    files to their service accounts. Do not reuse device or app passwords.
-3. Set `FL_TURN_URL=turns:freedomhub.at:5349?transport=tcp`. Allow inbound
+3. Set `FL_TURN_URL=turns:turn.freedomhub.at:5349?transport=tcp`. Allow inbound
    TCP 5349 and coturn's UDP relay range 49160–49200. Only TLS client listeners
    are enabled. Review host firewall and coturn peer restrictions before use.
 4. With an approved authenticated device, `/v1/calls/turn` should issue a fresh
@@ -43,3 +51,4 @@ session. Service traffic and media go through this server. iOS/Apple system
 connections such as APNs are outside the app's routing control.
 
 Reference: [coturn TURN REST API and server configuration](https://github.com/coturn/coturn/blob/master/README.turnserver).
+Routing reference: [Cloudflare proxy port support](https://developers.cloudflare.com/fundamentals/reference/network-ports/).

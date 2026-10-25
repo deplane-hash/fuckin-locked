@@ -28,7 +28,8 @@ Record the app commit/build, iPhone model and exact iOS version for each result.
 8. Link an additional phone with compared public key and explicit approval. Check
    pending/expired requests cannot authenticate and no history is restored. Revoke
    it; confirm existing sessions, pending envelopes and future key requests fail.
-9. With short-lived TURN-over-TLS credentials configured on the same server host,
+9. With short-lived TURN-over-TLS credentials on the pinned DNS-only media host
+   (`turn.freedomhub.at`), routed to the same server as the HTTPS gateway,
    start a call from each approved phone. Confirm offer/answer/ICE records are
    opaque in the relay, media works only through the TURN route, the UI reports
    connected audio only after the WebRTC connection is established, and a

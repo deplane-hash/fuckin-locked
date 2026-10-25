@@ -1,6 +1,6 @@
 # Preparation only. Replace every REPLACE_ value before installing.
-realm=freedomhub.at
-server-name=freedomhub.at
+realm=turn.freedomhub.at
+server-name=turn.freedomhub.at
 tls-listening-port=5349
 listening-ip=REPLACE_WITH_SERVER_INTERFACE_IP
 relay-ip=REPLACE_WITH_SERVER_INTERFACE_IP

@@ -49,7 +49,24 @@ struct DevicesResponse: Decodable { let devices: [DeviceInfo] }
 struct RoomCreated: Decodable { let room_id: String }
 struct RoomDevice: Decodable { let id: String; let user_id: String }
 struct RoomDevices: Decodable { let devices: [RoomDevice] }
-struct CallTURN: Decodable { let url: String; let username: String; let credential: String }
+struct CallTURN: Decodable {
+    let url: String
+    let username: String
+    let credential: String
+
+    func validateRoute(expectedHost: String) throws {
+        guard !expectedHost.isEmpty, !expectedHost.contains("REPLACE_"),
+              url.lowercased().hasPrefix("turns:"),
+              let parsed = URLComponents(string: "https://" + String(url.dropFirst(6))),
+              parsed.host?.lowercased() == expectedHost.lowercased(),
+              parsed.user == nil, parsed.password == nil, parsed.path.isEmpty,
+              parsed.fragment == nil, parsed.query == "transport=tcp",
+              parsed.port == nil || (1...65535).contains(parsed.port!),
+              !username.isEmpty, !credential.isEmpty else {
+            throw ConnectionError.unavailable
+        }
+    }
+}
 struct RoomMember: Decodable, Identifiable {
     let id: String
     let name: String
@@ -341,15 +358,12 @@ struct RelayPrekeyBundle: Codable {
 
     func callTURN() async throws -> CallTURN {
         let turn: CallTURN = try await request("/v1/calls/turn")
-        // Voice media must use the same operator-controlled route as service
-        // traffic. Reject a deployment that tries to hand the client an
-        // unrelated TURN host instead of silently creating a second route.
-        let authority = turn.url.lowercased().hasPrefix("turns:")
-            ? String(turn.url.dropFirst(6)).split(separator: "?", maxSplits: 1).first.map(String.init)
-            : nil
-        let turnHost = authority.flatMap { URL(string: "https://\($0)")?.host }
-        guard let expectedHost = base?.host,
-              turnHost == expectedHost else { throw ConnectionError.unavailable }
+        // Media uses one separately pinned operator-owned host. An HTTP CDN
+        // in front of the HTTPS gateway cannot carry TURN on port 5349.
+        guard let expectedHost = Bundle.main.object(forInfoDictionaryKey: "FLTURNHost") as? String else {
+            throw ConnectionError.unavailable
+        }
+        try turn.validateRoute(expectedHost: expectedHost)
         return turn
     }
 

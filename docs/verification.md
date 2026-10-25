@@ -38,7 +38,7 @@
 
 - The voice-call transport is now implemented in source: authenticated call
   signaling is carried as libsignal ciphertext, WebRTC is configured with
-  relay-only ICE and a same-host `turns:` endpoint, and calls stop on inactive
+  relay-only ICE and a separately pinned `turns:` hostname on the same server, and calls stop on inactive
   transitions. The server advertises `encrypted_calls_v1` only with a complete
   TURN-over-TLS configuration and never exposes the route without an active
   session. Calls remain omitted from bottom navigation.

@@ -2,6 +2,22 @@ import XCTest
 @testable import FuckinLocked
 
 @MainActor final class VoiceCallTests: XCTestCase {
+    func testTURNRouteIsPinnedTLSOnlyAndHasNoAlternateHost() throws {
+        let expected = "turn.freedomhub.at"
+        let valid = CallTURN(url: "turns:turn.freedomhub.at:5349?transport=tcp", username: "test", credential: "test")
+        XCTAssertNoThrow(try valid.validateRoute(expectedHost: expected))
+        XCTAssertThrowsError(try valid.validateRoute(expectedHost: ""))
+        for url in ["turn:turn.freedomhub.at:3478?transport=tcp",
+                    "turns:turn.freedomhub.at.evil.invalid:5349?transport=tcp",
+                    "turns:other.invalid:5349?transport=tcp",
+                    "turns:user:password@turn.freedomhub.at:5349?transport=tcp",
+                    "turns:turn.freedomhub.at:5349?transport=udp",
+                    "turns:turn.freedomhub.at:5349/path?transport=tcp"] {
+            XCTAssertThrowsError(try CallTURN(url: url, username: "test", credential: "test")
+                .validateRoute(expectedHost: expected))
+        }
+    }
+
     @MainActor private final class Session: VoiceCallSession {
         var state: VoiceCallState = .starting
         var received: [CallSignal] = []
