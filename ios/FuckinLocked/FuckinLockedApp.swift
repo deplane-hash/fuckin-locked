@@ -159,6 +159,10 @@ private struct AppUnlockView: View {
     @EnvironmentObject var vault: LocalVault
     @State private var password = ""
     @State private var error = ""
+    // Keep the successful transition local to this gate as well as in the
+    // vault. This prevents SwiftUI from briefly rebuilding the password
+    // branch while the encrypted payload is being opened.
+    @State private var unlocked = false
     @FocusState private var passwordFocused: Bool
     var body: some View {
         PasswordLayout(title: "fuckin locked", subtitle: "This app locks whenever you leave it.", content:
@@ -468,7 +472,7 @@ private struct ChatGateView: View {
     var title: String { vault.chats.first(where: { $0.id == id })?.title ?? "Chat" }
     var body: some View {
         Group {
-            if vault.unlockedChatID == id {
+            if unlocked && vault.unlockedChatID == id {
                 if let chat = vault.chats.first(where: { $0.id == id }), chat.isGroup, chat.roomID != nil {
                     GroupConversationView(id: id, title: title, vault: vault, gateway: gateway)
                 } else { ConversationView(id: id, title: title) }
@@ -479,7 +483,11 @@ private struct ChatGateView: View {
                             .focused($passwordFocused)
                         if !error.isEmpty { Text(error).foregroundStyle(.red) }
                         PrimaryButton(title: "Unlock chat") {
-                            do { try vault.unlockChat(id, password: password); password = "" }
+                            do {
+                                try vault.unlockChat(id, password: password)
+                                unlocked = true
+                                password = ""
+                            }
                             catch VaultError.delayed(let seconds) { error = "Try again in \(seconds) seconds" }
                             catch { self.error = "Password incorrect" }
                         }
@@ -491,6 +499,7 @@ private struct ChatGateView: View {
             Button("Lock chat") { vault.lockChat(); dismiss() }
         }}
         .onAppear {
+            unlocked = vault.unlockedChatID == id
             DispatchQueue.main.async { passwordFocused = true }
         }
         // ConversationView owns relocking when the conversation actually
