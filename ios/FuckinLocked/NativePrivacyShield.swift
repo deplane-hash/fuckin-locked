@@ -31,6 +31,8 @@ struct NativePrivacyShield: UIViewRepresentable {
     private var shield: UIWindow?
     private var observers: [NSObjectProtocol] = []
 
+    var isCoverVisible: Bool { shield?.isHidden == false }
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
         guard shield == nil, let scene = window?.windowScene else { return }
@@ -61,25 +63,37 @@ struct NativePrivacyShield: UIViewRepresentable {
         observers.append(NotificationCenter.default.addObserver(
             forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.shield?.isHidden = true
-                self?.window?.rootViewController?.view.accessibilityElementsHidden = false
-                // An alert-level cover must not leave the hosting window
-                // without keyboard focus after returning to the password UI.
-                self?.window?.makeKey()
-            }
+            MainActor.assumeIsolated { self?.revealIfActive() }
+        })
+        observers.append(NotificationCenter.default.addObserver(
+            forName: UIScene.didActivateNotification, object: scene, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.revealIfActive() }
+        })
+        observers.append(NotificationCenter.default.addObserver(
+            forName: UIScene.willDeactivateNotification, object: scene, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.conceal() }
         })
         if scene.activationState != .foregroundActive {
-            // Attaching a representable can happen during a SwiftUI render.
-            // Cover immediately, then handle initial inactive state outside
-            // that render. Real inactive notifications still lock synchronously.
+            // Attaching a representable can happen after the app notification
+            // but before scene activation. Initial construction only covers:
+            // root lifecycle handlers already invalidate the vault. Publishing
+            // another lock here would mutate SwiftUI during its render.
             cover.isHidden = false
             window?.rootViewController?.view.accessibilityElementsHidden = true
-            DispatchQueue.main.async { [weak self, weak scene] in
-                guard scene?.activationState != .foregroundActive else { return }
-                self?.onInactive?()
-            }
         }
+        // Settle a missed initial activation without ever revealing an
+        // inactive scene. Real inactive notifications remain synchronous.
+        DispatchQueue.main.async { [weak self] in self?.revealIfActive() }
+    }
+
+    private func revealIfActive() {
+        guard UIApplication.shared.applicationState == .active,
+              window?.windowScene?.activationState == .foregroundActive else { return }
+        shield?.isHidden = true
+        window?.rootViewController?.view.accessibilityElementsHidden = false
+        window?.makeKey()
     }
 
     private func conceal() {

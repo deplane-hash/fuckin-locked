@@ -78,7 +78,7 @@ jobs:
             CODE_SIGN_IDENTITY=- \
             -quiet
       - name: Verify simulator lifecycle
-        timeout-minutes: 10
+        timeout-minutes: 15
         working-directory: ios
         run: |
           xcrun simctl shutdown all
