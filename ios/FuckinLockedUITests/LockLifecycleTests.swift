@@ -35,7 +35,7 @@ final class LockLifecycleTests: XCTestCase {
         XCTAssertTrue(chatField.waitForExistence(timeout: 5), "Opening a chat must require its password")
         chatField.tap(); chatField.typeText(chatPassword)
         app.buttons["Unlock chat"].tap()
-        let localDraftStatus = app.descendants(matching: .any)["local-draft-status"]
+        let localDraftStatus = app.staticTexts["Local draft delivery is not configured"]
         XCTAssertTrue(localDraftStatus.waitForExistence(timeout: 15),
                       "Unlock must show an honestly labeled local draft")
 

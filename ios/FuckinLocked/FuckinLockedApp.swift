@@ -555,6 +555,8 @@ private struct ConversationView: View {
                 Text("Local draft — delivery is not configured")
                     .font(.caption)
                     .foregroundStyle(Palette.muted)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Local draft delivery is not configured")
                     .accessibilityIdentifier("local-draft-status")
             }
             if !ownFingerprint.isEmpty && !verified {
