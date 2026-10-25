@@ -40,6 +40,10 @@ final class LockLifecycleTests: XCTestCase {
         // completed without exposing the chat before authentication.
         XCTAssertTrue(app.buttons["Lock chat"].waitForExistence(timeout: 15),
                       "Unlock must show the conversation after its password")
+        let composer = app.otherElements["message-composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        XCTAssertLessThan(composer.frame.height, 160,
+                          "The composer must remain a compact row, not consume the conversation")
 
         XCUIDevice.shared.press(.home)
         app.activate()

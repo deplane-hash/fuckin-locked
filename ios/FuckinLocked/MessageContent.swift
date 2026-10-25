@@ -23,7 +23,9 @@ struct MessageContent: Codable {
                   groupID == nil else {
                 throw MessagingError.invalidMessage
             }
-            try callSignal.validate()
+            // Stale commands must still advance/acknowledge the authenticated
+            // Signal session so they cannot block later ordinary messages.
+            try callSignal.validate(requireFresh: false)
             return
         }
         if let groupID {
@@ -64,10 +66,10 @@ struct CallSignal: Codable, Equatable {
         expiresAt = try values.decodeIfPresent(Date.self, forKey: .expiresAt) ?? .distantPast
     }
 
-    func validate() throws {
+    func validate(requireFresh: Bool = true) throws {
         let remaining = expiresAt.timeIntervalSinceNow
         guard Self.kinds.contains(kind), body.count <= Self.maxBytes,
-              remaining > 0, remaining <= 120 else {
+              !requireFresh || (remaining > 0 && remaining <= 120) else {
             throw MessagingError.invalidMessage
         }
     }

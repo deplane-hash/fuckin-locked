@@ -665,7 +665,9 @@ private struct ConversationView: View {
                              preferredItemEncoding: .current) {
                     Image(systemName: "paperclip").frame(minWidth: 44, minHeight: 44)
                 }.disabled(!verified || messaging.working).accessibilityLabel("Attach image")
-            }.padding(14).background(Palette.surface, in: Capsule()).padding(.horizontal)
+            }.padding(14).background(Palette.surface, in: RoundedRectangle(cornerRadius: 24))
+                .accessibilityIdentifier("message-composer")
+                .padding(.horizontal)
             if drawer {
                 StickerDrawer(id: id, insert: { draft += $0 }, sendSticker: { sticker in
                     Task {

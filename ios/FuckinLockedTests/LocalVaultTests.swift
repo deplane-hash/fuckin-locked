@@ -53,6 +53,8 @@ import LibSignalClient
         let legacy = Data("{\"callID\":\"00000000-0000-0000-0000-000000000001\",\"kind\":\"offer\",\"body\":\"AQ==\"}".utf8)
         let readableHistory = try JSONDecoder().decode(CallSignal.self, from: legacy)
         XCTAssertThrowsError(try readableHistory.validate())
+        XCTAssertNoThrow(try MessageContent(id: UUID(), text: "", callSignal: readableHistory).validate(),
+                         "Expired authenticated commands must not block the message ratchet")
     }
     private func folder() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
