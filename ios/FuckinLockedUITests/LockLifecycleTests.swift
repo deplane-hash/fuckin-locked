@@ -1,6 +1,20 @@
 import XCTest
 
 final class LockLifecycleTests: XCTestCase {
+    @MainActor private func openLockedChat(_ friend: XCUIElement, in app: XCUIApplication) {
+        let gate = app.secureTextFields["Chat password"]
+        // A delayed system save sheet can consume the first navigation tap.
+        // Retry the real row action only while still in the inbox; never
+        // authenticate or alter vault state through a test hook.
+        for _ in 0..<3 {
+            declinePasswordStorageIfPresented(app)
+            if gate.exists { return }
+            if friend.isHittable { friend.tap() }
+            declinePasswordStorageIfPresented(app)
+            if gate.waitForExistence(timeout: 2) { return }
+        }
+    }
+
     @MainActor private func declinePasswordStorageIfPresented(_ app: XCUIApplication) {
         // On iOS 26 this remote system UI is exposed as an embedded Sheet,
         // so XCTest's interruption monitor does not necessarily run for it.
@@ -57,8 +71,7 @@ final class LockLifecycleTests: XCTestCase {
         declinePasswordStorageIfPresented(app)
         let friend = app.staticTexts["Lifecycle test friend"].firstMatch
         XCTAssertTrue(friend.waitForExistence(timeout: 5), "Created local draft must appear in Chats")
-        friend.tap()
-        declinePasswordStorageIfPresented(app)
+        openLockedChat(friend, in: app)
         let chatField = app.secureTextFields["Chat password"]
         XCTAssertTrue(chatField.waitForExistence(timeout: 5), "Opening a chat must require its password")
         chatField.tap(); chatField.typeText(chatPassword)
@@ -87,7 +100,7 @@ final class LockLifecycleTests: XCTestCase {
         // render; allow the security work plus the SwiftUI transition to
         // complete instead of treating it as a lock bypass/failure.
         XCTAssertTrue(friend.waitForExistence(timeout: 15), "App unlock after background must reopen Chats")
-        friend.tap()
+        openLockedChat(friend, in: app)
         XCTAssertTrue(chatField.waitForExistence(timeout: 5), "Chat must be relocked after background")
         XCTAssertFalse(app.buttons["Lock chat"].exists)
 
