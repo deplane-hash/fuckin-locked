@@ -22,6 +22,9 @@ final class LockLifecycleTests: XCTestCase {
         let compose = app.buttons["Compose"]
         XCTAssertTrue(compose.waitForExistence(timeout: 10), "App password creation must open Chats")
         compose.tap()
+        let localDraft = app.buttons["Create a local draft instead"]
+        XCTAssertTrue(localDraft.waitForExistence(timeout: 5))
+        localDraft.tap()
         let name = app.textFields["Name"]
         XCTAssertTrue(name.waitForExistence(timeout: 5), "Compose must open the local draft form")
         name.tap(); name.typeText("Lifecycle test friend")

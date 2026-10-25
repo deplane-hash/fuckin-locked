@@ -343,18 +343,22 @@ private struct ComposeView: View {
         selection.hasPrefix("person:") || selection.hasPrefix("room:")
     }
 
+    private var isLocalDraft: Bool { selection == "draft" }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 14) {
-                Text(isEncryptedSelection ? "Encrypted one-to-one" : "Local draft chat")
+                Text(isEncryptedSelection ? "Encrypted one-to-one" : isLocalDraft ? "Local draft chat" : "New chat")
                     .font(.headline)
                 Text(isEncryptedSelection
                      ? "Messages use an end-to-end encrypted session after device verification."
-                     : "A local draft is stored only on this device.")
+                     : isLocalDraft ? "A local draft is stored only on this device."
+                     : "Choose an approved friend and their device to start an encrypted conversation.")
                     .font(.footnote).foregroundStyle(Palette.muted)
                 if !availablePeople.isEmpty || !oneToOneRooms.isEmpty {
                     Picker("Conversation", selection: $selection) {
-                        Text("Local draft").tag("")
+                        Text("Choose a friend").tag("")
+                        if isLocalDraft { Text("Local draft").tag("draft") }
                         ForEach(availablePeople) { person in
                             Text("New · \(person.name) · @\(person.username)").tag("person:\(person.id)")
                         }
@@ -365,6 +369,16 @@ private struct ComposeView: View {
                     .pickerStyle(.menu)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(14).background(Palette.surface, in: RoundedRectangle(cornerRadius: 16))
+                }
+                if !isLocalDraft && !isEncryptedSelection {
+                    if availablePeople.isEmpty && oneToOneRooms.isEmpty {
+                        Text(vault.deviceID.isEmpty
+                             ? "Join using an invitation in You first. Then approved friends appear here."
+                             : "No approved friends yet. Invite a friend from People, then return here.")
+                            .font(.footnote).foregroundStyle(Palette.muted)
+                    }
+                    Button("Create a local draft instead") { selection = "draft" }
+                        .font(.footnote)
                 }
                 TextField("Name", text: $title).flField()
                 if isEncryptedSelection && !peerDevices.isEmpty {
@@ -377,17 +391,18 @@ private struct ComposeView: View {
                     Text("Check the device ID with your friend. Each device needs its own fingerprint verification.")
                         .font(.footnote).foregroundStyle(Palette.muted)
                 }
-                if !isEncryptedSelection {
+                if isLocalDraft {
                     Toggle("Group", isOn: $group).tint(Palette.lime)
                 }
                 SecureField("Separate chat password", text: $password).flField()
                 if !error.isEmpty { Text(error).foregroundStyle(.red) }
-                PrimaryButton(title: isEncryptedSelection ? "Add encrypted chat" : "Create locked draft") {
+                PrimaryButton(title: isEncryptedSelection ? "Add encrypted chat" : isLocalDraft ? "Create locked draft" : "Choose a friend") {
                     Task {
                         do {
-                            if selection.isEmpty {
+                            if isLocalDraft {
                                 try vault.createChat(title: title, isGroup: group, password: password)
                             } else {
+                                guard isEncryptedSelection else { throw MessagingError.invalidMessage }
                                 try await gateway.login(deviceID: vault.deviceID)
                                 let room: String
                                 let peerID: String
@@ -421,13 +436,13 @@ private struct ComposeView: View {
                             }
                             dismiss()
                         } catch {
-                            self.error = selection.isEmpty
+                            self.error = isLocalDraft
                                 ? "Enter a name and a password of at least 12 characters"
                                 : (error is MessagingError ? "This room is already on this device" : "Can't connect or create this chat")
                         }
                     }
                 }
-                .disabled(isEncryptedSelection && peerDeviceID.isEmpty)
+                .disabled(!isLocalDraft && (!isEncryptedSelection || peerDeviceID.isEmpty))
                 Spacer()
             }.padding(22).background(Palette.background).foregroundStyle(Palette.text)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() } } }
@@ -520,6 +535,7 @@ private struct ConversationView: View {
     @State private var draft = ""
     @State private var drawer = false
     @State private var showChangePassword = false
+    @State private var showEncryptedCompose = false
     @State private var fingerprint = ""
     @State private var ownFingerprint = ""
     @State private var selectedPhoto: PhotosPickerItem?
@@ -552,6 +568,8 @@ private struct ConversationView: View {
                     .accessibilityIdentifier("local-draft-status")
                 Text("This draft stays on this iPhone. Create an encrypted chat from Chats to message an approved friend.")
                     .font(.footnote).foregroundStyle(Palette.muted).padding(.horizontal)
+                Button("Create encrypted chat") { showEncryptedCompose = true }
+                    .font(.subheadline).foregroundStyle(Palette.lime)
             }
             if !ownFingerprint.isEmpty && !verified {
                 VStack(alignment: .leading, spacing: 5) {
@@ -706,6 +724,7 @@ private struct ConversationView: View {
             }
         }
         .sheet(isPresented: $showChangePassword) { ChangeChatPasswordView(id: id) }
+        .sheet(isPresented: $showEncryptedCompose) { ComposeView() }
         .task {
             let generation = vault.chatGeneration
             // Local drafts never enter the relay or libsignal path. Surface
