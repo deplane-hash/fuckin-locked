@@ -551,7 +551,7 @@ private struct ConversationView: View {
                 Button("Lock chat") { callController?.stop(); draft = ""; vault.lockChat() }
                     .foregroundStyle(Palette.lime)
             }.padding(.horizontal)
-            if let chat = try? vault.chatMetadata(for: id), chat.roomID == nil {
+            if vault.chats.first(where: { $0.id == id })?.roomID == nil {
                 Text("Local draft — delivery is not configured")
                     .font(.caption)
                     .foregroundStyle(Palette.muted)
@@ -715,7 +715,7 @@ private struct ConversationView: View {
             // Local drafts never enter the relay or libsignal path. Surface
             // that boundary immediately instead of waiting for a network
             // operation to report localChatOnly.
-            if let chat = try? vault.chatMetadata(for: id), chat.roomID == nil {
+            if vault.chats.first(where: { $0.id == id })?.roomID == nil {
                 status = "Local draft — delivery is not configured"
                 return
             }
