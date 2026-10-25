@@ -2,6 +2,16 @@
 
 ## Call privacy corrections awaiting new Xcode verification
 
+- Run 40156246173 passed all 30 core simulator tests, including the native
+  privacy-cover notification regression and pinned TURN-host rejection cases.
+  Its lifecycle test passed chat unlock and the compact composer check, then
+  failed at app-password entry after backgrounding. The saved screen recording
+  shows an iOS "Save Password?" dialog blocking that field. Explicit password
+  AutoFill/save hints have now been removed from app password fields; the UI
+  test declines only that known system prompt if iOS heuristics still show it.
+  This change awaits a new lifecycle run. No claim is made that an app can
+  prevent a user from manually storing a password in another password manager.
+
 - Incoming calls now require explicit Accept before network/media construction.
   Both directions check verified identity, unlocked chat, app activity, and an
   operation generation across asynchronous setup. Every vault lock stops the

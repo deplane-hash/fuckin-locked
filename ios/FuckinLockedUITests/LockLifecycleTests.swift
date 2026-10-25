@@ -8,6 +8,15 @@ final class LockLifecycleTests: XCTestCase {
 
     @MainActor
     func testBackgroundAndRelaunchRequireAppAndChatPasswords() throws {
+        // iOS may infer a password-saving prompt even without content-type
+        // hints. Dismiss only this known system prompt, never permissions or
+        // authentication dialogs, and still type both passwords in full.
+        addUIInterruptionMonitor(withDescription: "Decline system password storage") { alert in
+            guard alert.staticTexts["Save Password?"].exists,
+                  alert.buttons["Not Now"].exists else { return false }
+            alert.buttons["Not Now"].tap()
+            return true
+        }
         let app = XCUIApplication()
         app.launch()
         let appPassword = "uitest app password"

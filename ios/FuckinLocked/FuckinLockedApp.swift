@@ -145,10 +145,12 @@ private struct CreatePasswordView: View {
         PasswordLayout(title: "fuckin locked", subtitle: "Set a separate app password. You will need it every time you return.", content:
             VStack(spacing: 14) {
                 SecureField("App password · 12 characters minimum", text: $password)
-                    .textContentType(.newPassword).textInputAutocapitalization(.never)
+                    .textContentType(nil).textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
                     .flField()
                 SecureField("Repeat password", text: $repeatPassword)
-                    .textContentType(.newPassword).flField()
+                    .textContentType(nil).textInputAutocapitalization(.never)
+                    .autocorrectionDisabled().flField()
                 if !error.isEmpty { Text(error).foregroundStyle(.red).font(.footnote) }
                 PrimaryButton(title: "Create password") {
                     guard password == repeatPassword else { error = "Passwords do not match"; return }
@@ -169,7 +171,8 @@ private struct AppUnlockView: View {
         PasswordLayout(title: "fuckin locked", subtitle: "This app locks whenever you leave it.", content:
             VStack(spacing: 14) {
                 SecureField("App password", text: $password)
-                    .textContentType(.password).flField()
+                    .textContentType(nil).textInputAutocapitalization(.never)
+                    .autocorrectionDisabled().flField()
                     .focused($passwordFocused)
                 if !error.isEmpty { Text(error).foregroundStyle(.red).font(.footnote) }
                 PrimaryButton(title: "Unlock") {
