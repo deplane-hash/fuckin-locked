@@ -1,6 +1,33 @@
 # Verification report — 2026-10-25
 
-## Call privacy corrections awaiting new Xcode verification
+## Latest verified build
+
+- [Run 40190714250](https://github.com/deplane-hash/fuckin-locked/actions/runs/40190714250)
+  passed at source revision `a95a30c5820a5d3f71f2370c82cef13e14bcacab`:
+  **30 core simulator tests, 1 lifecycle UI test, zero failures**. The unsigned
+  Release iPhone IPA also built and uploaded successfully. Signing was skipped.
+- The UI test exercised password setup, explicit local-draft creation, chat
+  password entry, compact composer sizing, Home/background return requiring
+  the app password, chat relocking, and termination/relaunch requiring the
+  app password. It declined only the known iOS password-saving sheet and
+  retried navigation when that sheet consumed a row tap. It used no vault
+  bypass or pre-authenticated test state.
+- Core cases include encrypted vault and password rewrapping, persistent
+  failure delays, libsignal two-client HTTPS delivery, abandoned-call outbox
+  rejection, call consent/identity/lock races, native privacy-cover events,
+  expired call commands, and pinned TURN-host rejection.
+- The separately executed Python server suite passed **22 tests**. The live
+  gateway health/auth checks returned 200 and 401 respectively; these do not
+  verify authenticated live messaging or call media.
+- [Unsigned IPA artifact](https://github.com/deplane-hash/fuckin-locked/actions/runs/40190714250/artifacts/12597951767).
+  GitHub wraps the IPA in an artifact ZIP. Device installation requires signing.
+- Not performed: live TURN/DNS deployment, two physical iPhone audio/message
+  checks, physical capture/snapshot timing, APNs setup, or independent security
+  review. `turn.freedomhub.at` is prepared in configuration but not provisioned.
+  Calls remain absent from bottom navigation. Push/background delivery and
+  animated/general attachment or pack importing are still unfinished.
+
+## Implemented corrections and earlier diagnostics
 
 - Run 40156246173 passed all 30 core simulator tests, including the native
   privacy-cover notification regression and pinned TURN-host rejection cases.
@@ -9,7 +36,7 @@
   shows an iOS "Save Password?" dialog blocking that field. Explicit password
   AutoFill/save hints have now been removed from app password fields; the UI
   test declines only that known system prompt if iOS heuristics still show it.
-  This change awaits a new lifecycle run. No claim is made that an app can
+  The later successful run above supersedes that failure. No claim is made that an app can
   prevent a user from manually storing a password in another password manager.
 
 - Incoming calls now require explicit Accept before network/media construction.
@@ -24,7 +51,7 @@
 - Added coordinator tests for consent, rejection, identity changes, synchronous
   locks, delayed completions, failed media setup, and matching hangups. Added an
   HTTPS integration regression for abandoned offline calls and expiry tests.
-  These new iOS checks are pending the next macOS workflow.
+  These checks passed in the latest verified run above.
 - Corrected the UIKit composer's vertical sizing and duplicate local-draft
   notice. Local drafts remain explicitly separate from recipient-bound chats.
 - Previous run 40149937507 built the unsigned device IPA and passed the
@@ -41,8 +68,8 @@
   while the keyboard covered the non-scrollable password form. PasswordLayout
   now scrolls within the keyboard-safe area. Initial privacy-cover attachment
   no longer publishes vault changes inside a SwiftUI render; actual inactive
-  notifications still cover and lock synchronously. These UI changes require
-  the next workflow result.
+  notifications still cover and lock synchronously. The latest workflow above
+  validates the corrected simulator UI path.
 
 ## Current milestone status (supersedes historical notes below)
 
@@ -52,7 +79,7 @@
   transitions. The server advertises `encrypted_calls_v1` only with a complete
   TURN-over-TLS configuration and never exposes the route without an active
   session. Calls remain omitted from bottom navigation.
-- Server suite currently passes **21 tests**, including authenticated TURN
+- Server suite currently passes **22 tests**, including authenticated TURN
   capability gating, invalid/absent TURN configuration, opaque envelope
   storage, revocation, and invitation races.
 - Xcode run `40144712171` compiled the WebRTC/libsignal integration and passed
