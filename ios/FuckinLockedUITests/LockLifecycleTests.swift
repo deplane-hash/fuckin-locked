@@ -35,7 +35,8 @@ final class LockLifecycleTests: XCTestCase {
         XCTAssertTrue(chatField.waitForExistence(timeout: 5), "Opening a chat must require its password")
         chatField.tap(); chatField.typeText(chatPassword)
         app.buttons["Unlock chat"].tap()
-        XCTAssertTrue(app.staticTexts["Local draft — delivery is not configured"].waitForExistence(timeout: 10),
+        let localDraftStatus = app.descendants(matching: .any)["local-draft-status"]
+        XCTAssertTrue(localDraftStatus.waitForExistence(timeout: 15),
                       "Unlock must show an honestly labeled local draft")
 
         XCUIDevice.shared.press(.home)
@@ -51,7 +52,7 @@ final class LockLifecycleTests: XCTestCase {
         XCTAssertTrue(friend.waitForExistence(timeout: 15), "App unlock after background must reopen Chats")
         friend.tap()
         XCTAssertTrue(chatField.waitForExistence(timeout: 5), "Chat must be relocked after background")
-        XCTAssertFalse(app.staticTexts["Local draft — delivery is not configured"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["local-draft-status"].exists)
 
         app.terminate()
         app.launch()

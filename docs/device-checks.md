@@ -28,14 +28,21 @@ Record the app commit/build, iPhone model and exact iOS version for each result.
 8. Link an additional phone with compared public key and explicit approval. Check
    pending/expired requests cannot authenticate and no history is restored. Revoke
    it; confirm existing sessions, pending envelopes and future key requests fail.
-9. Exercise VoiceOver, Dynamic Type, Reduce Motion and keyboard navigation. While
+9. With short-lived TURN-over-TLS credentials configured on the same server host,
+   start a call from each approved phone. Confirm offer/answer/ICE records are
+   opaque in the relay, media works only through the TURN route, the UI reports
+   connected audio only after the WebRTC connection is established, and a
+   background/capture transition stops the call. Remove the TURN configuration
+   and confirm the capability gate makes calling unavailable with no direct
+   fallback.
+10. Exercise VoiceOver, Dynamic Type, Reduce Motion and keyboard navigation. While
    locked, accessibility must expose no chat names/messages/images. Check media,
    long press, selection, drag, previews and navigation have no content export path.
-10. With an authorized developer tool, inspect file-protection and backup flags.
+11. With an authorized developer tool, inspect file-protection and backup flags.
     Exercise real backup/restore and verify no usable plaintext history, media or
     transferred Keychain key appears. Inspect app-owned files/logs for test strings
     and keys. Do not publish or collect actual user passwords/private keys.
-11. Disable the required gateway and attempt an invalid certificate and a redirect.
+12. Disable the required gateway and attempt an invalid certificate and a redirect.
     Confirm a connection error with no alternate/direct host requests. Test TLS
     renewal for the same hostname and check only public prekeys/ciphertext reach
     the relay. Photos/iCloud and future APNs system connections are outside this
