@@ -159,10 +159,6 @@ private struct AppUnlockView: View {
     @EnvironmentObject var vault: LocalVault
     @State private var password = ""
     @State private var error = ""
-    // Keep the successful transition local to this gate as well as in the
-    // vault. This prevents SwiftUI from briefly rebuilding the password
-    // branch while the encrypted payload is being opened.
-    @State private var unlocked = false
     @FocusState private var passwordFocused: Bool
     var body: some View {
         PasswordLayout(title: "fuckin locked", subtitle: "This app locks whenever you leave it.", content:
@@ -468,6 +464,10 @@ private struct ChatGateView: View {
     let id: UUID
     @State private var password = ""
     @State private var error = ""
+    // Keep the successful transition local to this gate as well as in the
+    // vault. This prevents SwiftUI from briefly rebuilding the password
+    // branch while the encrypted payload is being opened.
+    @State private var unlocked = false
     @FocusState private var passwordFocused: Bool
     var title: String { vault.chats.first(where: { $0.id == id })?.title ?? "Chat" }
     var body: some View {
