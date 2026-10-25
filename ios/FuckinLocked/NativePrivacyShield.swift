@@ -9,6 +9,10 @@ struct NativePrivacyShield: UIViewRepresentable {
 
     func makeUIView(context: Context) -> ShieldAnchor {
         let anchor = ShieldAnchor()
+        // This view only locates the scene. It must never intercept touches
+        // intended for password controls in a pushed hosting controller.
+        anchor.isUserInteractionEnabled = false
+        anchor.isAccessibilityElement = false
         anchor.onInactive = onInactive
         return anchor
     }

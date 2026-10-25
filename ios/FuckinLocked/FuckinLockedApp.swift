@@ -61,7 +61,7 @@ private struct PrivateRootView: View {
                 forceCover = true
                 gateway.disconnect()
                 vault.lockApp()
-            })
+            }.allowsHitTesting(false).accessibilityHidden(true))
             .preferredColorScheme(.dark)
             .onChange(of: phase) { _, newPhase in
                 if newPhase != .active { gateway.disconnect(); vault.lockApp() }
@@ -689,6 +689,7 @@ private struct ConversationView: View {
                     Image(systemName: "paperclip").frame(minWidth: 44, minHeight: 44)
                 }.disabled(!verified || messaging.working).accessibilityLabel("Attach image")
             }.padding(14).background(Palette.surface, in: RoundedRectangle(cornerRadius: 24))
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("message-composer")
                 .padding(.horizontal)
             if drawer {
