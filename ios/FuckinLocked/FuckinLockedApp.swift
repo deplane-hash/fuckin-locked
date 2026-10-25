@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import PhotosUI
+import UniformTypeIdentifiers
 import CryptoKit
 import LibSignalClient
 
@@ -836,6 +837,14 @@ struct StickerDrawer: View {
     @State private var selected = "All"
     @State private var tab = "Stickers"
     @State private var pack = "All packs"
+    @State private var importing = false
+    @State private var importGeneration: UInt64 = 0
+    @State private var importStatus = ""
+    @State private var showPackCredits = false
+    @State private var persistenceEnabled = false
+    private var allStickers: [StarterSticker] {
+        StarterStickers.items + (library.importedPacks ?? []).flatMap(\.items)
+    }
     private let items = [
         ("🙂", "smile happy"), ("😄", "laugh happy"), ("💚", "green heart love"),
         ("✨", "sparkles stars"), ("🔥", "fire hot"), ("🙌", "hands celebrate"),
@@ -851,12 +860,12 @@ struct StickerDrawer: View {
     }
     private var stickers: [StarterSticker] {
         let source = selected == "Recent" ? library.recentStickers.compactMap { key in
-            StarterStickers.items.first { $0.id == key }
-        } : StarterStickers.items
+            allStickers.first { $0.id == key }
+        } : allStickers
         return source.filter {
             (selected != "Favorites" || library.favoriteStickers.contains($0.id)) &&
             (pack == "All packs" || pack == $0.pack) &&
-            (search.isEmpty || $0.title.localizedCaseInsensitiveContains(search))
+            (search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) || $0.tags.localizedCaseInsensitiveContains(search))
         }
     }
     var body: some View {
@@ -876,9 +885,19 @@ struct StickerDrawer: View {
                 ForEach(["All", "Recent", "Favorites"], id: \.self) { Text($0) }
             }.pickerStyle(.segmented)
             if tab == "Stickers" {
+                Button("Import sticker pack") {
+                    importGeneration = vault.chatGeneration
+                    importing = true
+                }.foregroundStyle(Palette.lime)
+                if !(library.importedPacks ?? []).isEmpty {
+                    Button("Pack credits") { showPackCredits = true }.foregroundStyle(Palette.lime)
+                }
+                if !importStatus.isEmpty {
+                    Text(importStatus).font(.caption).foregroundStyle(Palette.muted)
+                }
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack {
-                        ForEach(["All packs", "Energy", "Night"], id: \.self) { title in
+                        ForEach(["All packs"] + Array(Set(allStickers.map(\.pack))).sorted(), id: \.self) { title in
                             Button(title) { pack = title }
                                 .padding(10).foregroundStyle(pack == title ? Palette.lime : Palette.muted)
                         }
@@ -932,8 +951,44 @@ struct StickerDrawer: View {
                 }
             }.frame(maxHeight: 240)
         }.padding().background(Palette.surface, in: UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24))
-            .task { library = (try? vault.composerLibrary(for: id)) ?? ComposerLibrary() }
-            .onChange(of: library) { _, value in try? vault.saveComposerLibrary(value, for: id) }
+            .task {
+                library = (try? vault.composerLibrary(for: id)) ?? ComposerLibrary()
+                persistenceEnabled = true
+            }
+            .onChange(of: library) { _, value in
+                guard persistenceEnabled else { return }
+                do { try vault.saveComposerLibrary(value, for: id) }
+                catch { importStatus = "Couldn't save sticker preferences" }
+            }
+            .sheet(isPresented: $showPackCredits) {
+                NavigationStack {
+                    List(library.importedPacks ?? []) { imported in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(imported.name).font(.headline)
+                            Text(imported.author)
+                            Text(imported.license).font(.footnote)
+                        }
+                    }.navigationTitle("Pack credits")
+                        .toolbar { Button("Done") { showPackCredits = false } }
+                }
+            }
+            .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
+                guard vault.unlockedChatID == id, vault.chatGeneration == importGeneration else { return }
+                do {
+                    let imported = try StickerPack.read(result.get())
+                    var updated = library
+                    try updated.add(imported)
+                    // Commit first: a failed write must not claim the import succeeded.
+                    try vault.saveComposerLibrary(updated, for: id)
+                    library = updated
+                    importStatus = "Imported \(imported.name). \(imported.author) · \(imported.license)"
+                } catch let error as CocoaError where error.code == .userCancelled { }
+                catch { importStatus = "Can't import this pack. Use a valid version 2 pack with bounded still images." }
+            }
+            .onDisappear {
+                persistenceEnabled = false
+                library = ComposerLibrary(); search = ""; importStatus = ""
+            }
             .gesture(DragGesture(minimumDistance: 30).onEnded { if $0.translation.height > 60 { close() } })
     }
 }

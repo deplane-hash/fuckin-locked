@@ -11,17 +11,6 @@ on:
         default: false
 
 jobs:
-  diagnose-lifecycle:
-    runs-on: macos-26
-    steps:
-      - name: Locate previous lifecycle failure
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh run download 40132216165 --repo "$GITHUB_REPOSITORY" \
-            --name fuckin-locked-simulator-results --dir "$RUNNER_TEMP/previous.xcresult"
-          xcrun xcresulttool get object --legacy --format json --path "$RUNNER_TEMP/previous.xcresult" \
-            | jq '.issues.testFailureSummaries._values[] | {message: .message._value, location: .documentLocationInCreatingWorkspace.url._value}'
   ios:
     runs-on: macos-26
     timeout-minutes: 60
@@ -60,6 +49,9 @@ jobs:
           done
           cat "$RUNNER_TEMP/fuckin-locked-relay.log"
           exit 1
+      - name: Test relay authorization and storage boundaries
+        working-directory: server
+        run: '"$RUNNER_TEMP/fuckin-locked-venv/bin/python" -m unittest -q'
       - name: Build and test protocol and vault on simulator
         timeout-minutes: 12
         working-directory: ios

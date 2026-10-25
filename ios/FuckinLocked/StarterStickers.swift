@@ -4,8 +4,11 @@ struct StarterSticker: Identifiable {
     let id: String
     let title: String
     let pack: String
+    var asset: Data? = nil
+    var tags: String = ""
 
     func imageData() throws -> Data {
+        if let asset { try PrivateImage.validate(asset); return asset }
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = false
@@ -58,4 +61,5 @@ struct ComposerLibrary: Codable, Equatable {
     var favoriteEmoji: Set<String> = []
     var recentStickers: [String] = []
     var favoriteStickers: Set<String> = []
+    var importedPacks: [StickerPack]? = nil
 }
