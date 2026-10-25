@@ -24,6 +24,9 @@ reads the scoped source URL without creating a plaintext import or thumbnail
 file. The external original remains wherever you placed it; importing does not
 encrypt or delete it. File providers may use their own cloud connections.
 
+[Download the original CC0 example pack](example-sticker-pack.json) to exercise
+the importer with a small, non-private lime-circle asset.
+
 - Schema 2, 1–32 stickers, unique lowercase ASCII IDs using letters/digits/`-`/`_`.
 - At most 3 MB JSON, 2 MB decoded images per pack, 8 packs and 8 MB per chat.
 - Single-frame PNG/JPEG only, at most 1024 × 1024 pixels and 256 KB per image.
@@ -39,5 +42,5 @@ The complete pack commits through the atomic encrypted vault. A lock-generation
 change rejects a delayed picker result. If the picker causes an inactive
 transition, reopen and unlock before retrying; locks are never bypassed.
 
-Apple references: [scoped file import](https://developer.apple.com/documentation/swiftui/view/fileimporter(ispresented:allowedcontenttypes:oncompletion:)),
+Apple references: [open-in-place picker](https://developer.apple.com/documentation/uikit/uidocumentpickerviewcontroller/init(foropeningcontenttypes:ascopy:)),
 [Image I/O destinations](https://developer.apple.com/documentation/imageio/cgimagedestination).

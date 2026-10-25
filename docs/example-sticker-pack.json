@@ -1,0 +1,18 @@
+{
+  "schema": 2,
+  "id": "original-dot",
+  "name": "Original dot",
+  "author": "Fuckin Locked contributors",
+  "license": "CC0-1.0",
+  "stickers": [
+    {
+      "id": "lime-dot",
+      "name": "Lime dot",
+      "tags": [
+        "lime",
+        "circle"
+      ],
+      "image": "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAfUlEQVR4nO3WOxbAIAhEUffoXrO0tLHOSZTPAWYKClrerZRx3XMgBxr3Ah5h0gBS2AXJCJsg2XERURE/IqriW0Rl/BdBB8iOfxBUgKr4C9GABjSACgB/iCgA8M+IAgA/SChOsmjEtiEBIhDH/RqAF6LaawFoIaZ9HkDowAELwxNiLzL5C/QAAAAASUVORK5CYII="
+    }
+  ]
+}

@@ -7,6 +7,8 @@ messages first. Simulator results do not replace two real iPhones.
 
 Use the successful run for the latest source on
 [GitHub Actions](https://github.com/deplane-hash/fuckin-locked/actions).
+The verified 0.3.0 artifacts are [iPhone IPA](https://github.com/deplane-hash/fuckin-locked/actions/runs/40199838055/artifacts/12602032741)
+and [Appetize simulator](https://github.com/deplane-hash/fuckin-locked/actions/runs/40199838055/artifacts/12602047167).
 
 - Real iPhones: download `fuckin-locked-unsigned-ipa`, extract the outer GitHub
   ZIP, sign its `.ipa` with a valid matching profile, then install.

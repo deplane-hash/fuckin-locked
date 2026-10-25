@@ -40,6 +40,21 @@ unfinished. Voice calls have a relay-only implementation but are not exposed in
 navigation until physical two-device verification. Each chat binds one remote
 device; adding a device never silently authorizes it in existing protocol sessions.
 
-There is no push/background-delivery design, independent review, or secure new-device pairing UI. The relay is a control-plane and ciphertext-storage prototype, not proof of complete secure messaging. Its one-time prekey endpoint is integrated for the first one-to-one session but needs replenishment/exhaustion handling for normal asynchronous operation. The current chat binding supports one remote device; adding devices requires a separate approved binding and rekey design. SwiftUI's transient string and data buffers cannot be guaranteed wiped. Apple's backup exclusion is a resource hint and needs device-level verification; a backup policy should additionally exclude the app's private files. The relay's metadata requires encrypted server storage and operational access control, even though names and usernames are field-encrypted. Server backups, if enabled, must also be encrypted and must never contain plaintext content.
+Background push and independent review remain absent. Manual public-key device
+pairing with authenticated, expiring approval is implemented; QR scanning is not.
+The prekey path generates a replacement after local consumption, but sustained
+exhaustion and larger multi-device pools still need review. Each chat binds one
+explicit remote device. New devices receive no historical keys. SwiftUI's
+transient strings/data cannot be guaranteed wiped. Backup exclusions and file
+protection need real-device validation. Server metadata requires operational
+access control and encrypted storage/backups even though names are field-encrypted.
+
+Imported sticker packs are bounded untrusted input. The native picker explicitly
+opens in place without an app-owned plaintext import copy; scoped access ends
+after the coordinated read. Schema/IDs/codecs/frame count/dimensions/bytes are
+checked before whole-pack vault commit; pixels are re-encoded without source
+EXIF/GPS. A lock-generation change rejects delayed picker results. Original files
+and file-provider caches remain outside the vault and are not retroactively
+encrypted or deleted. Animated packs are rejected. See `sticker-format.md`.
 
 Voice calls are implemented as a relay-only WebRTC audio path, but remain omitted from navigation pending physical two-device verification. The relay supplies only authenticated TURN-over-TLS configuration; WebRTC's DTLS-SRTP protects media and libsignal protects call signaling. A malicious TURN operator can still observe relay metadata and traffic timing, and a compromised endpoint or malicious recipient can record audio. TURN credentials must be short-lived and rotated by deployment operations. Calls fail closed when the gateway, capability gate, or TURN route is unavailable; there is no direct media fallback.

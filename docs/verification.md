@@ -1,6 +1,90 @@
-# Verification report — 2026-10-25
+# Verification report — foreground beta 0.3.0, 2026-10-25
 
-## Latest verified build
+## Current verified testing build
+
+[Run 40199838055](https://github.com/deplane-hash/fuckin-locked/actions/runs/40199838055)
+completed successfully at source `9c0bb068dc623f367f68a321f226ed795d3bd737`.
+Xcode 26.6 built the iOS simulator app and unsigned Release iPhone IPA.
+Downloaded archives matched GitHub's SHA-256 digests and passed ZIP integrity
+checks. Their executable Mach-O platform IDs were checked: iOS device (2) for
+the IPA and iOS Simulator (7) for the Appetize ZIP, both arm64. Version is 0.3.0;
+the device build number is 64. Simulator execution on Appetize itself is untested.
+
+Inner-file SHA-256:
+
+```text
+27464f2bf8fbf97b7831008c3ccf026dcd5c5284ca0cae421be567d4a9f2dfd3  FuckinLocked-0.3.0-unsigned.ipa
+9f73eb4883b156ae696fea2a7b15eeb078631da1d44634f2cadaa2178b4f9dfe  FuckinLocked-0.3.0-simulator.app.zip
+```
+
+- **38 core simulator tests passed; zero failed.** This includes real libsignal
+  two-client HTTPS fixture delivery, encrypted vault/password changes, atomic
+  write failure recovery, persistent password delays, pinned TURN route,
+  consent/lock/identity call races, unanswered-call teardown, and sticker-pack
+  bounds, malformed input, symlink rejection, GPS stripping and encrypted
+  persistence across restart. Animated imports are explicitly rejected.
+- **1 lifecycle UI test passed.** It used real app/chat password fields,
+  background/return and terminate/relaunch, without an authentication bypass.
+  It also checked the compact composer. The known system password-save sheet
+  was declined; no app privacy protections were disabled.
+- **22 relay tests passed in macOS CI and on the live host's isolated test
+  fixtures.** Coverage includes admission/device-approval races, revocation,
+  session termination, ciphertext recipient authorization and TURN credentials.
+- [iPhone IPA artifact](https://github.com/deplane-hash/fuckin-locked/actions/runs/40199838055/artifacts/12602032741).
+  It is unsigned and requires valid signing before installation.
+- [Appetize simulator artifact](https://github.com/deplane-hash/fuckin-locked/actions/runs/40199838055/artifacts/12602047167).
+  Extract GitHub's outer ZIP and upload the inner simulator `.app.zip`.
+
+## Live server checks
+
+The authorized matching relay and coturn deployment are active. Service traffic
+uses the existing HTTPS gateway; media uses DNS-only `turn.freedomhub.at` with
+TLS/TCP 5349 and relay-only ICE. The unrelated FreedomHub site still returns 200.
+
+- Gateway health returned 200; TURN configuration without a session returned 401.
+- OpenSSL verified the public certificate chain and `turn.freedomhub.at` name
+  using TLS 1.3. The certificate expires 2027-01-23.
+- A coturn TLS client-to-client test on this host's public IP completed with
+  **200 messages sent, 198 received**. This confirms authenticated relay traffic,
+  not zero-loss delivery, off-host reachability or actual WebRTC audio.
+- Invalid credentials failed allocation. A plaintext TCP test did not complete
+  before its timeout. The official client separately requires TLS and rejects
+  alternate TURN hosts; no direct media fallback is configured.
+- The certificate deploy hook was exercised: protected cert/key copies were
+  refreshed, only coturn restarted, and TLS validation still passed. A real
+  future CA renewal and two-iPhone certificate rotation remain unverified.
+- Database mode is 0600 under a 0700 service directory; service UMask is 0077.
+  Root-only recovery files are in `/root/fuckin-locked-backup-20261025T120955Z`.
+  No deployment secret or device private key was committed to source.
+
+## Limits and testing gates
+
+This is the agreed **foreground testing** release. Background push, background
+ringing/calls, GIF integrations, general/video/animated attachments, QR pairing
+and broader profile/preferences work are unfinished. No inactive feature tabs
+are presented. Static pack importing is implemented; its system picker still
+needs hands-on device validation. Both phones must keep the same chat open and
+unlocked for incoming messages and calls.
+
+Not verified: independently installed physical iPhones exchanging live messages
+or audio, Appetize execution itself, capture/snapshot timing on physical devices,
+real backup/restore and file-protection enforcement, broad VoiceOver/Dynamic Type
+coverage, or independent security review. Simulator tests cannot establish these.
+An initial microphone permission prompt can lock the app; unlock and retry.
+
+Builds use Swift 5 language mode. The WebRTC callback handoff emits Swift 6
+sendability warnings for its Objective-C session-description type. No Swift 6
+migration or independent concurrency review is claimed. Dependency/toolchain
+warnings did not fail the tested Swift 5 build.
+
+See [installation and first-account setup](foreground-beta.md),
+[physical-device checks](device-checks.md), [threat model](threat-model.md), and
+[dependency/licensing notes](protocol-integration.md). Do not describe this as
+production-ready or every product feature as finished.
+
+## Historical reports (superseded by the sections above)
+
+### Earlier verified build
 
 - [Run 40190714250](https://github.com/deplane-hash/fuckin-locked/actions/runs/40190714250)
   passed at source revision `a95a30c5820a5d3f71f2370c82cef13e14bcacab`:
