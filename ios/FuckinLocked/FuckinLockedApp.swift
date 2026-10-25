@@ -278,8 +278,13 @@ private struct ChatsView: View {
                     filter("Groups", selected: groupsOnly) { groupsOnly = true }
                 }
                 if visible.isEmpty {
-                    Text("No chats yet").foregroundStyle(Palette.muted)
-                        .frame(maxWidth: .infinity, minHeight: 180)
+                    VStack(spacing: 10) {
+                        Text(search.isEmpty ? "No chats yet" : "No matching chats")
+                        if vault.deviceID.isEmpty && search.isEmpty {
+                            Text("Open You to use an invitation or set up the first device. Then invite a friend in People.")
+                                .font(.subheadline).multilineTextAlignment(.center)
+                        }
+                    }.foregroundStyle(Palette.muted).frame(maxWidth: .infinity, minHeight: 180)
                 }
                 ForEach(visible) { chat in
                     NavigationLink(value: chat.id) {
@@ -972,7 +977,9 @@ struct StickerDrawer: View {
                         .toolbar { Button("Done") { showPackCredits = false } }
                 }
             }
-            .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
+            .sheet(isPresented: $importing) {
+                StickerPackPicker { result in
+                importing = false
                 guard vault.unlockedChatID == id, vault.chatGeneration == importGeneration else { return }
                 do {
                     let imported = try StickerPack.read(result.get())
@@ -984,6 +991,7 @@ struct StickerDrawer: View {
                     importStatus = "Imported \(imported.name). \(imported.author) · \(imported.license)"
                 } catch let error as CocoaError where error.code == .userCancelled { }
                 catch { importStatus = "Can't import this pack. Use a valid version 2 pack with bounded still images." }
+                }
             }
             .onDisappear {
                 persistenceEnabled = false
@@ -1076,6 +1084,8 @@ private struct YouView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 Text("You").font(.largeTitle.bold())
+                Text("Testing build · Messages and calls arrive while the chat is open and unlocked. Background notifications are not available yet.")
+                    .font(.footnote).foregroundStyle(Palette.muted)
                 HStack(spacing: 14) {
                     Text(String(vault.profileName.prefix(1))).font(.title)
                         .frame(width: 58, height: 58).background(Palette.surface, in: Circle())

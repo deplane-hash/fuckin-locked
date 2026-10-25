@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=REPLACE_WITH_SERVICE_USER
+UMask=0077
 WorkingDirectory=/opt/fuckin-locked/server
 EnvironmentFile=/etc/fuckin-locked/relay.env
 ExecStart=/opt/fuckin-locked/venv/bin/python /opt/fuckin-locked/server/service.py

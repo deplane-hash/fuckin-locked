@@ -1,37 +1,43 @@
-# Sticker assets and future import contract
+# Local sticker packs
 
-The shipped Energy/Night starter packs are original artwork drawn by code in
-`StarterStickers.swift`. They are sent as bounded images inside libsignal messages.
-No downloaded third-party assets or screenshot examples are included.
-
-Recent/Favorites and local search selections belong to the unlocked chat. They
-are saved inside its encrypted payload. Searches are never sent to a GIF service.
-
-Pack import is not implemented. A future importer should accept this versioned
-manifest plus local image files, after validating the whole pack before writing:
+Open an unlocked chat's sticker drawer and choose **Import sticker pack**. Import
+a single UTF-8 `.json` document using schema 2. The earlier schema-1 directory
+proposal was never implemented and is not accepted.
 
 ```json
 {
-  "schema": 1,
-  "id": "my-original-pack",
-  "name": "My pack",
+  "schema": 2,
+  "id": "my-pack",
+  "name": "My original pack",
   "author": "Artist",
-  "license": "License identifier or permission text",
+  "license": "CC0-1.0",
   "stickers": [
-    {"id": "hello", "name": "Hello", "tags": ["greeting"], "file": "hello.png"}
+    {"id": "hello", "name": "Hello", "tags": ["greeting"], "image": "BASE64_PNG_OR_JPEG_BYTES"}
   ]
 }
 ```
 
-- Allow only flat relative filenames, no paths, symlinks, remote URLs or scripts.
-- Require unique pack/sticker IDs, bounded strings and at most 100 assets.
-- Version 1 assets are static single-frame PNG/JPEG, at most 1024 × 1024 pixels
-  and 256 KB each. Preserve PNG alpha; reject oversized or malformed media.
-- Store imported files and generated thumbnails under a chat-protected key; do
-  not place decrypted files in temporary/share/backup directories.
-- Animation is not supported by the present client. Reject animation explicitly;
-  do not silently flatten it or claim it has been preserved. An animated format
-  needs a later schema with codec/frame/memory limits and an internal renderer.
-- Ship attribution/license information with any imported licensed pack.
+Replace the image placeholder with base64 PNG/JPEG data. Only import artwork you
+own or have permission to use. Attribution stays in **Pack credits**. Imported
+artwork, attribution, Recent and Favorites are chat-password encrypted. The app
+reads the scoped source URL without creating a plaintext import or thumbnail
+file. The external original remains wherever you placed it; importing does not
+encrypt or delete it. File providers may use their own cloud connections.
 
-This document defines a future compatibility contract, not a working import UI.
+- Schema 2, 1–32 stickers, unique lowercase ASCII IDs using letters/digits/`-`/`_`.
+- At most 3 MB JSON, 2 MB decoded images per pack, 8 packs and 8 MB per chat.
+- Single-frame PNG/JPEG only, at most 1024 × 1024 pixels and 256 KB per image.
+- Bounded names, tags, author and license; no control characters.
+- No URLs, archive extraction, asset paths, symlinks or scripts.
+
+Pixels are re-encoded as PNG, preserving alpha and dropping source EXIF/GPS.
+Re-encoded artwork must also fit the limits. Animation is rejected, never
+silently flattened. Animated stickers, GIF search and general files are outside
+this foreground beta. Searches stay local.
+
+The complete pack commits through the atomic encrypted vault. A lock-generation
+change rejects a delayed picker result. If the picker causes an inactive
+transition, reopen and unlock before retrying; locks are never bypassed.
+
+Apple references: [scoped file import](https://developer.apple.com/documentation/swiftui/view/fileimporter(ispresented:allowedcontenttypes:oncompletion:)),
+[Image I/O destinations](https://developer.apple.com/documentation/imageio/cgimagedestination).

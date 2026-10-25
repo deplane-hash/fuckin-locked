@@ -1,11 +1,27 @@
 # Voice call server setup
 
-These are prepared deployment instructions; no live server was changed.
+## Deployed test route — 2026-10-25
+
+The authorized deployment is running: DNS-only `turn.freedomhub.at` points at
+`62.171.165.206`, coturn listens on TLS/TCP 5349, and the authenticated gateway
+issues five-minute TURN credentials. The public CA certificate expires
+2027-01-23. Certbot renewal uses the dedicated HTTP challenge vhost; its deploy
+hook copies protected certificate/key files and restarts only coturn.
+
+Configuration is root/service-readable. Database permissions are 0600 and the
+relay uses UMask 0077. Recovery files are in the root-only
+`/root/fuckin-locked-backup-20261025T120955Z`; never publish that backup.
+
+TLS hostname/chain validation passed; the unauthenticated TURN API returned 401.
+An authenticated TLS client-to-client test transferred traffic on this host's
+public address. That is not an off-host or physical-iPhone audio check. The
+existing FreedomHub website and its proxied DNS are preserved.
+
+## Recreating or rotating the deployment
 
 1. The prepared media hostname is `turn.freedomhub.at`, pinned in the iOS build
-   with `FL_TURN_HOST`. It is not provisioned yet. Create a DNS-only A record
-   pointing it to the supplied server address `62.171.165.206` after deployment
-   authorization. Keep the existing website's DNS/proxy settings unchanged.
+   with `FL_TURN_HOST`. Keep a DNS-only A record pointing to `62.171.165.206`.
+   Keep the existing website's DNS/proxy settings unchanged.
    The main `freedomhub.at` record is Cloudflare-proxied; ordinary HTTP proxying
    cannot carry TURN on port 5349. Use this dedicated DNS-only hostname.
    Install a maintained coturn release on the same server as `freedomhub.at`.

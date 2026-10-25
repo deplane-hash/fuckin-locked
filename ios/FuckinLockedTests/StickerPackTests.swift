@@ -43,6 +43,35 @@ import ImageIO
         XCTAssertThrowsError(try malformed.validate())
     }
 
+    func testImportStripsGPSAndRejectsAnimation() throws {
+        let original = try pack()
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(original.stickers[0].image as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let tagged = NSMutableData()
+        let jpeg = try XCTUnwrap(CGImageDestinationCreateWithData(tagged, "public.jpeg" as CFString, 1, nil))
+        CGImageDestinationAddImage(jpeg, image, [kCGImagePropertyGPSDictionary: [
+            kCGImagePropertyGPSLatitude: 48.0, kCGImagePropertyGPSLongitude: 16.0,
+            kCGImagePropertyGPSLatitudeRef: "N", kCGImagePropertyGPSLongitudeRef: "E"
+        ]] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(jpeg))
+        let taggedSource = try XCTUnwrap(CGImageSourceCreateWithData(tagged, nil))
+        let before = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(taggedSource, 0, nil) as? [CFString: Any])
+        XCTAssertNotNil(before[kCGImagePropertyGPSDictionary])
+        let asset = StickerPack.Asset(id: "hello", name: "Hello", tags: [], image: tagged as Data)
+        let taggedPack = StickerPack(schema: 2, id: "pack", name: "Pack", author: "Artist",
+                                    license: "CC0", stickers: [asset])
+        let clean = try StickerPack.decode(JSONEncoder().encode(taggedPack))
+        let cleanSource = try XCTUnwrap(CGImageSourceCreateWithData(clean.stickers[0].image as CFData, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(cleanSource, 0, nil) as? [CFString: Any])
+        XCTAssertNil(properties[kCGImagePropertyGPSDictionary])
+        let animated = NSMutableData()
+        let gif = try XCTUnwrap(CGImageDestinationCreateWithData(animated, "com.compuserve.gif" as CFString, 2, nil))
+        CGImageDestinationAddImage(gif, image, nil)
+        CGImageDestinationAddImage(gif, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(gif))
+        XCTAssertThrowsError(try PrivateImage.validate(animated as Data))
+    }
+
     func testImportedArtworkAndAttributionStayChatEncryptedAcrossRestart() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

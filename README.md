@@ -2,6 +2,9 @@
 
 Native SwiftUI iPhone messenger and an opaque-ciphertext Python relay. This is an implementation under test, not a production-ready or independently reviewed messenger. Read [the verification report](docs/verification.md) before relying on a feature.
 
+See [Foreground beta 0.3.0](docs/foreground-beta.md) for installation, private
+first-device setup, Appetize downloads and the two-phone foreground test.
+
 The current one-to-one path implements libsignal text, reactions, bounded still-image messages, original starter stickers, and an encrypted audio-call path. App and chat passwords protect the underlying local keys. Local draft chats are explicitly labeled and never presented as delivered conversations. Calls use WebRTC DTLS-SRTP with relay-only TURN-over-TLS media; offer/answer/ICE signaling remains inside the existing libsignal message channel. Calls are intentionally not exposed as a navigation destination until two-device media verification is complete.
 
 ## Project layout
@@ -70,7 +73,7 @@ A native opaque scene window covers inactive content synchronously at the UIKit 
 
 Image import uses the system Photos picker, resizes a still image to at most 1024 pixels, re-encodes without EXIF/GPS metadata, and limits transmitted images to 256 KB. No app-owned plaintext image or thumbnail file is written. The system picker may fetch an original from iCloud over Apple's own system connections, outside the app gateway. Received images have an internal viewer and no Photos/Files saving controls. Video, generic files, GIF services and animated media are unfinished.
 
-The drawer has functional **Stickers** and **Emoji** tabs, local search, pack shortcuts, Recent/Favorites and close/drag controls. Three original stickers are rendered by `StarterStickers.swift`; no user screenshot assets were imported. Preferences are chat-encrypted. See [the future import format](docs/sticker-format.md); pack import itself is unfinished.
+The drawer has functional **Stickers** and **Emoji** tabs, local search, pack shortcuts, Recent/Favorites and close/drag controls. Three original stickers are rendered by `StarterStickers.swift`; no user screenshot assets were imported. Preferences and imported static packs are chat-encrypted. See [the supported import format](docs/sticker-format.md), limits and attribution.
 
 No chat copying, sharing, forwarding, external opening or attachment saving is provided. The native composer allows paste but blocks export edit actions, dragging/dropping and Writing Tools; third-party keyboard extensions are disallowed. Public device-pairing identifiers can be selected; this does not expose messages. There are no analytics or third-party crash SDKs. The relay never logs request URLs, headers or bodies; CI fixture diagnostics contain method/status codes only. An authorized recipient can still transcribe or photograph a screen. A compromised OS, modified client, jailbroken device or malicious recipient is outside the official client's guarantees.
 

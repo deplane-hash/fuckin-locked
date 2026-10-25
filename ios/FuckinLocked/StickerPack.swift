@@ -1,5 +1,8 @@
 import Foundation
 import ImageIO
+import SwiftUI
+import UniformTypeIdentifiers
+import UIKit
 
 // A single bounded JSON document avoids archive paths, symlinks, executable
 // files and URL fetching. Imported artwork is stored only in chat ciphertext.
@@ -60,8 +63,8 @@ struct StickerPack: Codable, Equatable, Identifiable {
             // validator; no silent flattening or third-party GIF integration.
             try PrivateImage.validate(asset.image)
             guard let source = CGImageSourceCreateWithData(asset.image as CFData, nil),
-                  let type = CGImageSourceGetType(source) as String?,
-                  ["public.png", "public.jpeg"].contains(type),
+                  let type = CGImageSourceGetType(source),
+                  ["public.png", "public.jpeg"].contains(type as String),
                   let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
                   let width = properties[kCGImagePropertyPixelWidth] as? Int,
                   let height = properties[kCGImagePropertyPixelHeight] as? Int,
@@ -80,6 +83,21 @@ struct StickerPack: Codable, Equatable, Identifiable {
         guard url.isFileURL else { throw MessagingError.invalidMessage }
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        guard try url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true else {
+            throw MessagingError.invalidMessage
+        }
+        var coordinationError: NSError?
+        var result: Result<Self, Error>?
+        NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: url, options: .withoutChanges,
+                                       error: &coordinationError) { coordinated in
+            result = Result { try readCoordinated(coordinated) }
+        }
+        if let coordinationError { throw coordinationError }
+        guard let result else { throw MessagingError.invalidMessage }
+        return try result.get()
+    }
+
+    private static func readCoordinated(_ url: URL) throws -> Self {
         let properties = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
         guard properties.isRegularFile == true, properties.isSymbolicLink != true,
               let size = properties.fileSize, size <= maxDocumentBytes else {
@@ -102,6 +120,35 @@ struct StickerPack: Codable, Equatable, Identifiable {
         !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         value.utf8.count <= limit &&
         value.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) }
+    }
+}
+
+// Explicit open-in-place policy: never ask iOS to import a plaintext copy into
+// the app's Documents/Inbox. Cloud providers still control their own caches.
+struct StickerPackPicker: UIViewControllerRepresentable {
+    let completion: (Result<URL, Error>) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(completion: completion) }
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.json], asCopy: false)
+        picker.allowsMultipleSelection = false
+        picker.delegate = context.coordinator
+        return picker
+    }
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) { }
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let completion: (Result<URL, Error>) -> Void
+        init(completion: @escaping (Result<URL, Error>) -> Void) { self.completion = completion }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            guard urls.count == 1, let url = urls.first else {
+                completion(.failure(MessagingError.invalidMessage)); return
+            }
+            completion(.success(url))
+        }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            completion(.failure(CocoaError(.userCancelled)))
+        }
     }
 }
 

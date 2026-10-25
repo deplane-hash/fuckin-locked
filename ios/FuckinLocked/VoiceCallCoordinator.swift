@@ -67,6 +67,7 @@ struct VoiceCallStatus: View {
     private var lockToken: UUID?
     private var epoch: UInt64 = 0
     private var closed = false
+    private var connectionDeadline: Date?
 
     convenience init(id: UUID, vault: LocalVault, gateway: Gateway, messaging: MessagingService) {
         self.init(id: id, vault: vault, dependencies: VoiceCallDependencies(
@@ -106,6 +107,7 @@ struct VoiceCallStatus: View {
     func startOutgoing() async {
         guard callID == nil, authorized() else { return }
         callID = UUID()
+        connectionDeadline = Date().addingTimeInterval(90)
         state = .starting
         await setup(isCaller: true)
     }
@@ -181,6 +183,7 @@ struct VoiceCallStatus: View {
 
     func consume(_ records: [StoredMessage]) {
         guard authorized() else { stop(sendHangup: false); return }
+        expireUnansweredCall()
         for record in records where !record.isOutgoing {
             guard let signal = record.callSignal, consumedMessages.insert(record.id).inserted else { continue }
             guard (try? signal.validate()) != nil else { continue }
@@ -189,6 +192,7 @@ struct VoiceCallStatus: View {
                 callID = signal.callID
                 pendingOffer = signal
                 pendingOfferDate = record.sentAt
+                connectionDeadline = signal.expiresAt
                 hasIncomingOffer = true
                 state = .ringing
                 status = "Incoming call"
@@ -230,6 +234,8 @@ struct VoiceCallStatus: View {
                 guard let self, let call else { return }
                 do { try self.check(ticket, generation: generation) }
                 catch { if self.epoch == ticket { self.stop(sendHangup: false) }; return }
+                self.expireUnansweredCall()
+                guard self.callID != nil else { return }
                 self.state = call.state
                 if call.state == .connected { self.status = "Call connected" }
                 if call.state == .failed { self.fail("Call failed"); return }
@@ -244,6 +250,15 @@ struct VoiceCallStatus: View {
         status = message
     }
 
+    // Called both by chat polling (before consent) and the media observer.
+    // Unanswered calls must not leave a microphone session open indefinitely.
+    func expireUnansweredCall(at now: Date = Date()) {
+        guard callID != nil, engine?.state != .connected,
+              let connectionDeadline, now >= connectionDeadline else { return }
+        stop()
+        status = "Call unanswered"
+    }
+
     func stop(sendHangup: Bool = true) {
         let endedID = callID
         let maySend = sendHangup && authorized()
@@ -253,6 +268,7 @@ struct VoiceCallStatus: View {
         callID = nil
         pendingOffer = nil
         pendingOfferDate = nil
+        connectionDeadline = nil
         hasIncomingOffer = false
         signals.removeAll(keepingCapacity: false)
         stateTask?.cancel(); stateTask = nil

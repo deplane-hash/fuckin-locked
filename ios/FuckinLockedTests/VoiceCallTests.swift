@@ -2,6 +2,34 @@ import XCTest
 @testable import FuckinLocked
 
 @MainActor final class VoiceCallTests: XCTestCase {
+    func testUnansweredOutgoingCallStopsMediaButConnectedCallDoesNotExpire() async throws {
+        let f = try Fixture(); defer { f.cleanup() }
+        let c = f.coordinator(); defer { c.close() }
+        await c.startOutgoing()
+        XCTAssertTrue(c.isActive)
+        c.expireUnansweredCall(at: Date().addingTimeInterval(91))
+        XCTAssertFalse(c.isActive)
+        XCTAssertTrue(f.session.stopped)
+        XCTAssertEqual(c.status, "Call unanswered")
+        await c.startOutgoing()
+        f.session.state = .connected
+        c.expireUnansweredCall(at: Date().addingTimeInterval(91))
+        XCTAssertTrue(c.isActive)
+    }
+
+    func testIncomingOfferExpiresWithoutCreatingMedia() throws {
+        let f = try Fixture(); defer { f.cleanup() }
+        let c = f.coordinator(); defer { c.close() }
+        let offer = record()
+        c.consume([offer])
+        c.expireUnansweredCall(at: Date().addingTimeInterval(91))
+        XCTAssertFalse(c.hasIncomingOffer)
+        XCTAssertFalse(c.isActive)
+        XCTAssertEqual(f.made, 0)
+        c.consume([offer])
+        XCTAssertFalse(c.hasIncomingOffer)
+    }
+
     func testTURNRouteIsPinnedTLSOnlyAndHasNoAlternateHost() throws {
         let expected = "turn.freedomhub.at"
         let valid = CallTURN(url: "turns:turn.freedomhub.at:5349?transport=tcp", username: "test", credential: "test")
