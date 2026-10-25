@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import UIKit
 import WebRTC
 
 /// The signaling payload is carried inside a normal libsignal message.  SDP
@@ -36,7 +37,7 @@ enum VoiceCallError: Error {
 /// direct peer fallback, so calls fail closed when the configured route is
 /// unavailable.
 @MainActor final class VoiceCallEngine: NSObject, ObservableObject,
-                                         RTCPeerConnectionDelegate {
+                                         RTCPeerConnectionDelegate, VoiceCallSession {
     @Published private(set) var state: VoiceCallState = .idle
 
     let callID: UUID
@@ -48,6 +49,8 @@ enum VoiceCallError: Error {
     private var audioTrack: RTCAudioTrack?
     private var pendingCandidates: [RTCIceCandidate] = []
     private var stopped = false
+    private var sentDescription = false
+    private var localCandidates: [VoiceCallPayload] = []
 
     init(callID: UUID, isCaller: Bool, turn: CallTURN,
          sendSignal: @escaping (CallSignal) -> Void) throws {
@@ -80,33 +83,41 @@ enum VoiceCallError: Error {
         peerConnection = connection
         super.init()
         peerConnection.delegate = self
-        try configureAudioSession()
         let source = factory.audioSource(with: RTCMediaConstraints(
             mandatoryConstraints: nil, optionalConstraints: nil))
         let track = factory.audioTrack(with: source, trackId: "fuckin-locked-audio")
+        track.isEnabled = false
         guard peerConnection.add(track, streamIds: ["fuckin-locked-call"]) != nil else {
+            peerConnection.close()
             throw VoiceCallError.peerConnectionCreationFailed
         }
         audioTrack = track
         state = isCaller ? .starting : .ringing
     }
 
-    deinit {
-        peerConnection.delegate = nil
-    }
-
     private func configureAudioSession() throws {
         try audioSession.setCategory(.playAndRecord, mode: .voiceChat,
-                                     options: [.allowBluetooth, .allowBluetoothA2DP,
+                                     options: [.allowBluetoothHFP, .allowBluetoothA2DP,
                                                .defaultToSpeaker])
     }
 
     private func activateMicrophone() async throws {
+        try checkActive()
         let granted = await withCheckedContinuation { continuation in
-            audioSession.requestRecordPermission { continuation.resume(returning: $0) }
+            AVAudioApplication.requestRecordPermission { continuation.resume(returning: $0) }
         }
+        try checkActive()
         guard granted else { throw VoiceCallError.microphoneDenied }
+        try configureAudioSession()
         try audioSession.setActive(true)
+        audioTrack?.isEnabled = true
+    }
+
+    private func checkActive() throws {
+        try Task.checkCancellation()
+        guard !stopped, UIApplication.shared.applicationState == .active else {
+            throw VoiceCallError.unavailable
+        }
     }
 
     func startOutgoing() async throws {
@@ -117,21 +128,26 @@ enum VoiceCallError: Error {
                                    kRTCMediaConstraintsValueTrue],
             optionalConstraints: nil)
         let offer = try await createOffer(constraints)
+        try checkActive()
         try await setLocal(offer)
+        try checkActive()
         try send(description: offer, kind: "offer")
     }
 
-    func receive(_ signal: CallSignal) {
-        guard !stopped, signal.callID == callID else { return }
+    func receive(_ signal: CallSignal) async throws {
+        try checkActive()
+        guard signal.callID == callID else { throw VoiceCallError.protocolError }
         do {
             try signal.validate()
             switch signal.kind {
             case "offer":
                 guard !isCaller else { return }
-                Task { @MainActor in try await self.acceptOffer(signal) }
+                guard peerConnection.remoteDescription == nil else { throw VoiceCallError.protocolError }
+                try await acceptOffer(signal)
             case "answer":
                 guard isCaller else { return }
-                Task { @MainActor in try await self.acceptAnswer(signal) }
+                guard peerConnection.remoteDescription == nil else { throw VoiceCallError.protocolError }
+                try await acceptAnswer(signal)
             case "ice":
                 try addCandidate(signal)
             case "hangup":
@@ -140,7 +156,9 @@ enum VoiceCallError: Error {
                 break
             }
         } catch {
+            stop(sendHangup: false)
             state = .failed
+            throw error
         }
     }
 
@@ -153,13 +171,16 @@ enum VoiceCallError: Error {
                                    kRTCMediaConstraintsValueTrue],
             optionalConstraints: nil)
         let answer = try await createAnswer(constraints)
+        try checkActive()
         try await setLocal(answer)
+        try checkActive()
         try send(description: answer, kind: "answer")
         state = .connecting
     }
 
     private func acceptAnswer(_ signal: CallSignal) async throws {
         try await setRemote(decodeDescription(signal))
+        try checkActive()
         state = .connecting
     }
 
@@ -197,22 +218,33 @@ enum VoiceCallError: Error {
                 else { continuation.resume() }
             }
         }
+        try checkActive()
         for candidate in pendingCandidates {
-            peerConnection.add(candidate) { _ in }
+            try await peerConnection.add(candidate)
+            try checkActive()
         }
         pendingCandidates.removeAll(keepingCapacity: false)
     }
 
     private func send(description: RTCSessionDescription, kind: String) throws {
+        try checkActive()
         let payload = VoiceCallPayload(type: RTCSessionDescription.string(for: description.type),
                                        sdp: description.sdp, sdpMid: nil, sdpMLineIndex: nil)
         let body = try JSONEncoder().encode(payload)
         sendSignal(CallSignal(callID: callID, kind: kind, body: body))
+        sentDescription = true
+        for candidate in localCandidates {
+            sendSignal(CallSignal(callID: callID, kind: "ice", body: try JSONEncoder().encode(candidate)))
+        }
+        localCandidates.removeAll(keepingCapacity: false)
     }
 
     private func decodeDescription(_ signal: CallSignal) throws -> RTCSessionDescription {
         let payload = try JSONDecoder().decode(VoiceCallPayload.self, from: signal.body)
-        guard let type = payload.type, let sdp = payload.sdp else { throw VoiceCallError.protocolError }
+        guard let type = payload.type, type == signal.kind,
+              ["offer", "answer"].contains(type), let sdp = payload.sdp, !sdp.isEmpty else {
+            throw VoiceCallError.protocolError
+        }
         return RTCSessionDescription(type: RTCSessionDescription.type(for: type), sdp: sdp)
     }
 
@@ -223,9 +255,17 @@ enum VoiceCallError: Error {
         }
         let value = RTCIceCandidate(sdp: candidate, sdpMLineIndex: line, sdpMid: payload.sdpMid)
         if peerConnection.remoteDescription == nil {
+            guard pendingCandidates.count < 128 else { throw VoiceCallError.protocolError }
             pendingCandidates.append(value)
         } else {
-            peerConnection.add(value) { _ in }
+            peerConnection.add(value) { [weak self] error in
+                guard error != nil else { return }
+                Task { @MainActor in
+                    guard let self, !self.stopped else { return }
+                    self.stop(sendHangup: false)
+                    self.state = .failed
+                }
+            }
         }
     }
 
@@ -235,7 +275,11 @@ enum VoiceCallError: Error {
         if sendHangup {
             sendSignal(CallSignal(callID: callID, kind: "hangup", body: Data()))
         }
+        audioTrack?.isEnabled = false
+        peerConnection.delegate = nil
         peerConnection.close()
+        pendingCandidates.removeAll(keepingCapacity: false)
+        localCandidates.removeAll(keepingCapacity: false)
         audioTrack = nil
         try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
         state = .ended
@@ -255,8 +299,10 @@ enum VoiceCallError: Error {
         Task { @MainActor in
             guard !self.stopped else { return }
             switch newState {
-            case .connected, .completed: self.state = .connected
-            case .failed: self.state = .failed
+            case .connected, .completed: break // DTLS state below confirms connection.
+            case .failed:
+                self.stop(sendHangup: false)
+                self.state = .failed
             case .closed, .disconnected: self.stop(sendHangup: false)
             default: self.state = .connecting
             }
@@ -265,12 +311,33 @@ enum VoiceCallError: Error {
     nonisolated func peerConnection(_ peerConnection: RTCPeerConnection,
                                     didChange newState: RTCIceGatheringState) {}
     nonisolated func peerConnection(_ peerConnection: RTCPeerConnection,
-                                    didGenerate candidate: RTCIceCandidate) {
+                                    didChange newState: RTCPeerConnectionState) {
         Task { @MainActor in
             guard !self.stopped else { return }
-            let payload = VoiceCallPayload(type: nil, sdp: candidate.sdp,
-                                           sdpMid: candidate.sdpMid,
-                                           sdpMLineIndex: candidate.sdpMLineIndex)
+            switch newState {
+            case .connected: self.state = .connected
+            case .failed:
+                self.stop(sendHangup: false)
+                self.state = .failed
+            case .closed, .disconnected: self.stop(sendHangup: false)
+            default: self.state = .connecting
+            }
+        }
+    }
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection,
+                                    didGenerate candidate: RTCIceCandidate) {
+        let payload = VoiceCallPayload(type: nil, sdp: candidate.sdp,
+                                       sdpMid: candidate.sdpMid,
+                                       sdpMLineIndex: candidate.sdpMLineIndex)
+        Task { @MainActor in
+            guard !self.stopped else { return }
+            if !self.sentDescription {
+                guard self.localCandidates.count < 128 else {
+                    self.stop(sendHangup: false); self.state = .failed; return
+                }
+                self.localCandidates.append(payload)
+                return
+            }
             guard let body = try? JSONEncoder().encode(payload) else { return }
             self.sendSignal(CallSignal(callID: self.callID, kind: "ice", body: body))
         }

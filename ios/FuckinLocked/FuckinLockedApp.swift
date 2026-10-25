@@ -536,15 +536,7 @@ private struct ConversationView: View {
                 Spacer()
                 if let chat = try? vault.chatMetadata(for: id), !chat.isGroup,
                    let callController {
-                    Button {
-                        if callController.isActive {
-                            callController.stop()
-                        } else {
-                            Task { await callController.startOutgoing() }
-                        }
-                    } label: { Image(systemName: callController.isActive ? "phone.down.fill" : "phone") }
-                    .disabled(!callController.isActive && !verified)
-                    .accessibilityLabel(callController.isActive ? "End encrypted voice call" : "Start encrypted voice call")
+                    VoiceCallControls(controller: callController)
                 }
                 Button { showChangePassword = true } label: { Image(systemName: "key") }
                     .accessibilityLabel("Change chat password")
@@ -558,6 +550,8 @@ private struct ConversationView: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("Local draft delivery is not configured")
                     .accessibilityIdentifier("local-draft-status")
+                Text("This draft stays on this iPhone. Create an encrypted chat from Chats to message an approved friend.")
+                    .font(.footnote).foregroundStyle(Palette.muted).padding(.horizontal)
             }
             if !ownFingerprint.isEmpty && !verified {
                 VStack(alignment: .leading, spacing: 5) {
@@ -635,10 +629,10 @@ private struct ConversationView: View {
                     }
                 }.padding(.horizontal)
             }
-            if !status.isEmpty { Text(status).font(.caption).foregroundStyle(Palette.muted) }
-            if let callController, !callController.status.isEmpty {
-                Text(callController.status).font(.caption).foregroundStyle(Palette.muted)
+            if !status.isEmpty, vault.chats.first(where: { $0.id == id })?.roomID != nil {
+                Text(status).font(.caption).foregroundStyle(Palette.muted)
             }
+            if let callController { VoiceCallStatus(controller: callController) }
             HStack(spacing: 12) {
                 Button { drawer.toggle() } label: { Image(systemName: "face.smiling") }
                     .accessibilityLabel("Stickers and emoji")

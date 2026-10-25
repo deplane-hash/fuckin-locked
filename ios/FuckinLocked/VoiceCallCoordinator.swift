@@ -2,153 +2,276 @@ import Foundation
 import SwiftUI
 import UIKit
 
-/// Coordinates one call for the currently unlocked one-to-one chat. Signaling
-/// is deliberately sourced from StoredMessage records, so a call cannot be
-/// created from an unauthenticated or unbound relay event.
+@MainActor protocol VoiceCallSession: AnyObject {
+    var state: VoiceCallState { get }
+    func startOutgoing() async throws
+    func receive(_ signal: CallSignal) async throws
+    func stop(sendHangup: Bool)
+}
+
+struct VoiceCallControls: View {
+    @ObservedObject var controller: VoiceCallCoordinator
+
+    var body: some View {
+        if controller.hasIncomingOffer {
+            Button("Accept") { Task { await controller.acceptIncoming() } }
+                .accessibilityLabel("Accept voice call")
+            Button("Decline") { controller.stop() }
+                .accessibilityLabel("Decline voice call")
+        } else {
+            Button {
+                if controller.isActive { controller.stop() }
+                else { Task { await controller.startOutgoing() } }
+            } label: {
+                Image(systemName: controller.isActive ? "phone.down.fill" : "phone")
+            }
+            .accessibilityLabel(controller.isActive ? "End voice call" : "Start voice call")
+        }
+    }
+}
+
+struct VoiceCallStatus: View {
+    @ObservedObject var controller: VoiceCallCoordinator
+    var body: some View {
+        if !controller.status.isEmpty {
+            Text(controller.status).font(.caption).foregroundStyle(Palette.muted)
+        }
+    }
+}
+
+@MainActor struct VoiceCallDependencies {
+    var isActive: () -> Bool
+    var isVerified: () throws -> Bool
+    var turn: () async throws -> CallTURN
+    var makeSession: (UUID, Bool, CallTURN, @escaping (CallSignal) -> Void) throws -> any VoiceCallSession
+    var send: (CallSignal) async throws -> Void
+}
+
 @MainActor final class VoiceCallCoordinator: ObservableObject {
     @Published private(set) var state: VoiceCallState = .idle
     @Published private(set) var status = ""
-
+    @Published private(set) var hasIncomingOffer = false
     private let id: UUID
     private let vault: LocalVault
-    private let gateway: Gateway
-    private let messaging: MessagingService
-    private var engine: VoiceCallEngine?
+    private let dependencies: VoiceCallDependencies
+    private var engine: (any VoiceCallSession)?
     private var callID: UUID?
+    private var pendingOffer: CallSignal?
+    private var pendingOfferDate: Date?
+    private var signals: [CallSignal] = []
     private var consumedMessages = Set<UUID>()
     private var stateTask: Task<Void, Never>?
-    private var lifecycleToken: NSObjectProtocol?
+    private var signalTask: Task<Void, Never>?
+    private var sendTask: Task<Void, Never>?
+    private var outgoing: [CallSignal] = []
+    private var lockToken: UUID?
+    private var epoch: UInt64 = 0
+    private var closed = false
 
-    init(id: UUID, vault: LocalVault, gateway: Gateway, messaging: MessagingService) {
+    convenience init(id: UUID, vault: LocalVault, gateway: Gateway, messaging: MessagingService) {
+        self.init(id: id, vault: vault, dependencies: VoiceCallDependencies(
+            isActive: { UIApplication.shared.applicationState == .active },
+            isVerified: { try messaging.isPeerVerified(for: id) },
+            turn: {
+                try await gateway.login(deviceID: vault.deviceID)
+                try await gateway.requireCallCapabilities()
+                return try await gateway.callTURN()
+            },
+            makeSession: { try VoiceCallEngine(callID: $0, isCaller: $1, turn: $2, sendSignal: $3) },
+            send: { try await messaging.sendCallSignal($0, in: id) }))
+    }
+
+    init(id: UUID, vault: LocalVault, dependencies: VoiceCallDependencies) {
         self.id = id
         self.vault = vault
-        self.gateway = gateway
-        self.messaging = messaging
-        lifecycleToken = NotificationCenter.default.addObserver(
-            forName: UIApplication.willResignActiveNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.stop(sendHangup: false) }
-        }
+        self.dependencies = dependencies
+        // Synchronous for every vault lock, including capture and screenshots.
+        lockToken = vault.observeChatLock { [weak self] in self?.stop(sendHangup: false) }
     }
 
-    deinit {
-        stateTask?.cancel()
+    var isActive: Bool { callID != nil }
+
+    private func authorized() -> Bool {
+        !closed && dependencies.isActive() && vault.isUnlocked &&
+        vault.unlockedChatID == id && (try? dependencies.isVerified()) == true
     }
 
-    var isActive: Bool {
-        switch state {
-        case .starting, .ringing, .connecting, .connected: return true
-        default: return false
+    private func check(_ ticket: UInt64, generation: UInt64) throws {
+        try Task.checkCancellation()
+        guard epoch == ticket, vault.chatGeneration == generation, authorized() else {
+            throw VoiceCallError.unavailable
         }
     }
 
     func startOutgoing() async {
-        guard engine == nil else { return }
-        guard (try? messaging.isPeerVerified(for: id)) == true else {
-            status = "Verify this device before calling"
+        guard callID == nil, authorized() else { return }
+        callID = UUID()
+        state = .starting
+        await setup(isCaller: true)
+    }
+
+    func acceptIncoming() async {
+        guard hasIncomingOffer, let date = pendingOfferDate, fresh(date),
+              let pendingOffer, (try? pendingOffer.validate()) != nil, authorized() else {
+            stop(sendHangup: false)
             return
         }
+        hasIncomingOffer = false
+        state = .starting
+        await setup(isCaller: false)
+    }
+
+    private func setup(isCaller: Bool) async {
+        let ticket = epoch
+        let generation = vault.chatGeneration
+        guard let currentID = callID else { return }
         do {
-            try await gateway.login(deviceID: vault.deviceID)
-            try await gateway.requireCallCapabilities()
-            let turn = try await gateway.callTURN()
-            let newID = UUID()
-            let call = try makeEngine(callID: newID, isCaller: true, turn: turn)
+            try check(ticket, generation: generation)
+            let turn = try await dependencies.turn()
+            try check(ticket, generation: generation)
+            let call = try dependencies.makeSession(currentID, isCaller, turn) { [weak self] signal in
+                guard let self, self.epoch == ticket, self.authorized() else { return }
+                self.enqueue(signal, ticket: ticket, generation: generation)
+            }
             engine = call
-            callID = newID
-            observe(call)
-            try await call.startOutgoing()
-            status = "Calling…"
-        } catch VoiceCallError.microphoneDenied {
-            status = "Microphone access is required for calls"
-            stop(sendHangup: false)
-        } catch {
-            status = "Encrypted call unavailable"
-            stop(sendHangup: false)
-        }
-    }
-
-    /// Process newly decrypted call signals. The caller passes all records;
-    /// this method only consumes each record once and never treats an outgoing
-    /// signal as a remote command.
-    func consume(_ records: [StoredMessage]) {
-        for record in records where !record.isOutgoing {
-            guard let signal = record.callSignal, !consumedMessages.contains(record.id) else { continue }
-            consumedMessages.insert(record.id)
-            Task { @MainActor in await self.handleIncoming(signal, receivedAt: record.sentAt) }
-        }
-    }
-
-    private func handleIncoming(_ signal: CallSignal, receivedAt: Date) async {
-        // Do not turn a stale persisted offer into an unexpected call after a
-        // restart. Answers/ICE/hangups are accepted only for an active call.
-        let freshOffer = signal.kind == "offer" && Date().timeIntervalSince(receivedAt) <= 300
-        guard freshOffer || engine != nil else {
-            if signal.kind == "hangup" { stop(sendHangup: false) }
-            return
-        }
-        do {
-            if engine == nil {
-                try await gateway.login(deviceID: vault.deviceID)
-                try await gateway.requireCallCapabilities()
-                let turn = try await gateway.callTURN()
-                let call = try makeEngine(callID: signal.callID, isCaller: false, turn: turn)
-                engine = call
-                callID = signal.callID
-                observe(call)
+            if isCaller {
+                try await call.startOutgoing()
+            } else if let offer = pendingOffer {
+                try await call.receive(offer)
+            } else {
+                throw VoiceCallError.unavailable
             }
-            guard callID == signal.callID else { return }
-            engine?.receive(signal)
-            status = "Incoming encrypted call"
+            try check(ticket, generation: generation)
+            pendingOffer = nil
+            pendingOfferDate = nil
+            status = isCaller ? "Calling…" : "Connecting…"
+            observe(call, ticket: ticket, generation: generation)
+            drainSignals()
         } catch {
-            status = "Encrypted call unavailable"
-            stop(sendHangup: false)
+            guard epoch == ticket else { return }
+            fail(error is CancellationError ? "" : "Call unavailable")
         }
     }
 
-    private func makeEngine(callID: UUID, isCaller: Bool, turn: CallTURN) throws -> VoiceCallEngine {
-        try VoiceCallEngine(callID: callID, isCaller: isCaller, turn: turn) { [weak self] signal in
+    private func enqueue(_ signal: CallSignal, ticket: UInt64, generation: UInt64) {
+        guard outgoing.count < 128 else { fail("Call unavailable"); return }
+        outgoing.append(signal)
+        guard sendTask == nil else { return }
+        sendTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            Task { @MainActor in
-                do {
-                    try await self.messaging.sendCallSignal(signal, in: self.id)
-                } catch {
-                    self.status = "Call signaling unavailable"
-                    self.stop(sendHangup: false)
+            defer { if self.epoch == ticket { self.sendTask = nil } }
+            do {
+                while !self.outgoing.isEmpty {
+                    try self.check(ticket, generation: generation)
+                    let next = self.outgoing.removeFirst()
+                    try await self.dependencies.send(next)
+                    try self.check(ticket, generation: generation)
                 }
+            } catch {
+                if self.epoch == ticket { self.fail("Call signaling unavailable") }
             }
         }
     }
 
-    private func observe(_ call: VoiceCallEngine) {
+    private func fresh(_ date: Date) -> Bool {
+        let age = Date().timeIntervalSince(date)
+        return age >= -30 && age <= 300
+    }
+
+    func consume(_ records: [StoredMessage]) {
+        guard authorized() else { stop(sendHangup: false); return }
+        for record in records where !record.isOutgoing {
+            guard let signal = record.callSignal, consumedMessages.insert(record.id).inserted else { continue }
+            guard (try? signal.validate()) != nil else { continue }
+            if signal.kind == "offer" {
+                guard callID == nil, fresh(record.sentAt) else { continue }
+                callID = signal.callID
+                pendingOffer = signal
+                pendingOfferDate = record.sentAt
+                hasIncomingOffer = true
+                state = .ringing
+                status = "Incoming call"
+                // No network setup, audio session or microphone until Accept.
+            } else {
+                guard signal.callID == callID else { continue }
+                if signal.kind == "hangup" { stop(sendHangup: false); continue }
+                guard signals.count < 128 else { fail("Call unavailable"); return }
+                signals.append(signal)
+            }
+        }
+        drainSignals()
+    }
+
+    private func drainSignals() {
+        guard signalTask == nil, pendingOffer == nil, let call = engine else { return }
+        let ticket = epoch
+        let generation = vault.chatGeneration
+        signalTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { if self.epoch == ticket { self.signalTask = nil } }
+            do {
+                while !self.signals.isEmpty {
+                    try self.check(ticket, generation: generation)
+                    let signal = self.signals.removeFirst()
+                    try await call.receive(signal)
+                    try self.check(ticket, generation: generation)
+                }
+            } catch {
+                if self.epoch == ticket { self.fail("Call unavailable") }
+            }
+        }
+    }
+
+    private func observe(_ call: any VoiceCallSession, ticket: UInt64, generation: UInt64) {
         stateTask?.cancel()
         stateTask = Task { @MainActor [weak self, weak call] in
             while !Task.isCancelled {
                 guard let self, let call else { return }
+                do { try self.check(ticket, generation: generation) }
+                catch { if self.epoch == ticket { self.stop(sendHangup: false) }; return }
                 self.state = call.state
-                if call.state == .connected { self.status = "Encrypted call connected" }
-                if call.state == .failed { self.status = "Encrypted call failed" }
-                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+                if call.state == .connected { self.status = "Call connected" }
+                if call.state == .failed { self.fail("Call failed"); return }
+                if call.state == .ended { self.stop(sendHangup: false); return }
+                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
             }
         }
     }
 
+    private func fail(_ message: String) {
+        stop(sendHangup: false)
+        status = message
+    }
+
     func stop(sendHangup: Bool = true) {
-        engine?.stop(sendHangup: sendHangup)
+        let endedID = callID
+        let maySend = sendHangup && authorized()
+        epoch &+= 1
+        engine?.stop(sendHangup: false)
         engine = nil
         callID = nil
-        stateTask?.cancel()
-        stateTask = nil
+        pendingOffer = nil
+        pendingOfferDate = nil
+        hasIncomingOffer = false
+        signals.removeAll(keepingCapacity: false)
+        stateTask?.cancel(); stateTask = nil
+        signalTask?.cancel(); signalTask = nil
+        sendTask?.cancel(); sendTask = nil
+        outgoing.removeAll(keepingCapacity: false)
         state = .idle
-        if sendHangup { status = "" }
+        status = ""
+        if maySend, let endedID {
+            let ticket = epoch
+            Task { @MainActor [weak self] in
+                guard let self, self.epoch == ticket, self.authorized() else { return }
+                try? await self.dependencies.send(CallSignal(callID: endedID, kind: "hangup", body: Data()))
+            }
+        }
     }
 
     func close() {
-        if let lifecycleToken {
-            NotificationCenter.default.removeObserver(lifecycleToken)
-            self.lifecycleToken = nil
-        }
         stop(sendHangup: false)
+        closed = true
+        if let lockToken { vault.removeChatLockObserver(lockToken); self.lockToken = nil }
     }
 }
-

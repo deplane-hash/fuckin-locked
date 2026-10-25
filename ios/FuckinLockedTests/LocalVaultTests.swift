@@ -46,6 +46,13 @@ import LibSignalClient
         XCTAssertThrowsError(try MessageContent(id: UUID(), text: "", groupID: "group", callSignal: signal).validate())
         XCTAssertThrowsError(try CallSignal(callID: UUID(), kind: "ice",
                                             body: Data(repeating: 0, count: CallSignal.maxBytes + 1)).validate())
+        XCTAssertThrowsError(try CallSignal(callID: UUID(), kind: "offer", body: Data([1]),
+                                            expiresAt: Date().addingTimeInterval(-1)).validate())
+        XCTAssertThrowsError(try CallSignal(callID: UUID(), kind: "offer", body: Data([1]),
+                                            expiresAt: Date().addingTimeInterval(600)).validate())
+        let legacy = Data("{\"callID\":\"00000000-0000-0000-0000-000000000001\",\"kind\":\"offer\",\"body\":\"AQ==\"}".utf8)
+        let readableHistory = try JSONDecoder().decode(CallSignal.self, from: legacy)
+        XCTAssertThrowsError(try readableHistory.validate())
     }
     private func folder() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

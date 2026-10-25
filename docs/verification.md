@@ -1,4 +1,28 @@
-# Verification report — 2026-10-24
+# Verification report — 2026-10-25
+
+## Call privacy corrections awaiting new Xcode verification
+
+- Incoming calls now require explicit Accept before network/media construction.
+  Both directions check verified identity, unlocked chat, app activity, and an
+  operation generation across asynchronous setup. Every vault lock stops the
+  call synchronously, including screenshots, recording, and password changes.
+- Media failures disable the track, close the connection, clear candidate
+  buffers, and deactivate audio. Outbound signaling is serialized; SDP precedes
+  ICE. Call signaling no longer enters the durable message retry outbox and
+  carries an encrypted expiration. Legacy call history remains decodable but
+  cannot trigger calls.
+- Added coordinator tests for consent, rejection, identity changes, synchronous
+  locks, delayed completions, failed media setup, and matching hangups. Added an
+  HTTPS integration regression for abandoned offline calls and expiry tests.
+  These new iOS checks are pending the next macOS workflow.
+- Corrected the UIKit composer's vertical sizing and duplicate local-draft
+  notice. Local drafts remain explicitly separate from recipient-bound chats.
+- Previous run 40149937507 built the unsigned device IPA and passed the
+  protocol/vault suite, but lifecycle verification timed out with an incomplete
+  result bundle. The lifecycle job now uses a fresh simulator and propagates
+  failures without continue-on-error. A timeout is never a pass.
+- Server suite rerun locally: 21 tests passed. Physical iPhone call audio,
+  TURN deployment, capture/snapshot timing, and signing remain unverified.
 
 ## Current milestone status (supersedes historical notes below)
 

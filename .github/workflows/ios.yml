@@ -78,14 +78,20 @@ jobs:
             CODE_SIGN_IDENTITY=- \
             -quiet
       - name: Verify simulator lifecycle
-        timeout-minutes: 5
-        continue-on-error: true
+        timeout-minutes: 10
         working-directory: ios
         run: |
+          xcrun simctl shutdown all
+          simulator_id=$(xcrun simctl create FuckinLockedLifecycle com.apple.CoreSimulator.SimDeviceType.iPhone-17)
+          trap 'xcrun simctl delete "$simulator_id" || true' EXIT
+          xcrun simctl boot "$simulator_id"
+          xcrun simctl bootstatus "$simulator_id" -b
           xcodebuild test \
             -workspace FuckinLocked.xcworkspace \
             -scheme FuckinLockedRelayTests \
-            -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' \
+            -destination "platform=iOS Simulator,id=$simulator_id" \
+            -parallel-testing-enabled NO \
+            -maximum-concurrent-test-simulator-destinations 1 \
             -derivedDataPath "$RUNNER_TEMP/fuckin-locked-simulator-build" \
             -resultBundlePath "$RUNNER_TEMP/FuckinLockedLifecycle.xcresult" \
             -only-testing:FuckinLockedUITests \
@@ -107,11 +113,14 @@ jobs:
       - name: Report simulator failures
         if: always()
         run: |
-          if [ -d "$RUNNER_TEMP/FuckinLockedTests.xcresult" ]; then
+          if [ -f "$RUNNER_TEMP/FuckinLockedTests.xcresult/Info.plist" ]; then
             xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/FuckinLockedTests.xcresult"
           fi
-          if [ -d "$RUNNER_TEMP/FuckinLockedLifecycle.xcresult" ]; then
+          if [ -f "$RUNNER_TEMP/FuckinLockedLifecycle.xcresult/Info.plist" ]; then
             xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/FuckinLockedLifecycle.xcresult"
+          else
+            echo '::error::Lifecycle test result is incomplete or missing; lifecycle verification did not pass.'
+            exit 1
           fi
           cat "$RUNNER_TEMP/fuckin-locked-relay.log"
           simulator_app="$RUNNER_TEMP/fuckin-locked-simulator-build/Build/Products/Debug-iphonesimulator/FuckinLocked.app"

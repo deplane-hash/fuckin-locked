@@ -189,6 +189,13 @@ private final class OfflineTransport: URLProtocol {
             XCTFail("Offline send should remain queued")
         } catch MessagingError.queued {}
         XCTAssertEqual(aliceVault.messageRecords.last?.delivery, .sending)
+        let abandonedCall = CallSignal(callID: UUID(), kind: "offer", body: Data([1]))
+        do {
+            try await offlineMessaging.sendCallSignal(abandonedCall, in: aliceChatID)
+            XCTFail("Offline call signaling must fail")
+        } catch { }
+        XCTAssertFalse(aliceVault.messageRecords.contains { $0.callSignal?.callID == abandonedCall.callID },
+                       "An abandoned call must never enter the durable retry outbox")
         aliceVault.lockApp()
         try aliceVault.unlock("alice app password")
         try aliceVault.unlockChat(aliceChatID, password: "alice chat password")
@@ -198,6 +205,8 @@ private final class OfflineTransport: URLProtocol {
         try await bobMessaging.receive(in: bobChatID)
         try await aliceMessaging.receive(in: aliceChatID)
         XCTAssertEqual(bobVault.messageRecords.filter { $0.body == "queued while offline" }.count, 1)
+        XCTAssertFalse(bobVault.messageRecords.contains { $0.callSignal?.callID == abandonedCall.callID },
+                       "Reconnection must not replay an abandoned call")
 
         stage = "additional device approval and revocation"
         let linkedGateway = Gateway(baseURL: baseURL, session: session,

@@ -47,9 +47,27 @@ struct CallSignal: Codable, Equatable {
     let callID: UUID
     let kind: String
     let body: Data
+    let expiresAt: Date
+
+    init(callID: UUID, kind: String, body: Data, expiresAt: Date = Date().addingTimeInterval(90)) {
+        self.callID = callID; self.kind = kind; self.body = body; self.expiresAt = expiresAt
+    }
+
+    private enum CodingKeys: String, CodingKey { case callID, kind, body, expiresAt }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        callID = try values.decode(UUID.self, forKey: .callID)
+        kind = try values.decode(String.self, forKey: .kind)
+        body = try values.decode(Data.self, forKey: .body)
+        // Old history remains readable, but old call commands cannot ring.
+        expiresAt = try values.decodeIfPresent(Date.self, forKey: .expiresAt) ?? .distantPast
+    }
 
     func validate() throws {
-        guard Self.kinds.contains(kind), body.count <= Self.maxBytes else {
+        let remaining = expiresAt.timeIntervalSinceNow
+        guard Self.kinds.contains(kind), body.count <= Self.maxBytes,
+              remaining > 0, remaining <= 120 else {
             throw MessagingError.invalidMessage
         }
     }

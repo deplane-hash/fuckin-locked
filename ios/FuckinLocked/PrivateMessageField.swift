@@ -23,6 +23,7 @@ final class PrivateComposerTextField: UITextField, UITextDropDelegate {
         textDropDelegate = self
         if let drop = textDropInteraction { removeInteraction(drop) }
         setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentHuggingPriority(.required, for: .vertical)
         inputAssistantItem.leadingBarButtonGroups = []
         inputAssistantItem.trailingBarButtonGroups = []
     }
@@ -59,13 +60,19 @@ struct PrivateMessageField: UIViewRepresentable {
         field.isEnabled = isEnabled
     }
 
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: PrivateComposerTextField,
+                      context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 240,
+               height: max(44, (uiView.font?.lineHeight ?? 22) + 16))
+    }
+
     static func dismantleUIView(_ field: PrivateComposerTextField, coordinator: Coordinator) {
         field.text = ""
         field.resignFirstResponder()
         field.removeTarget(coordinator, action: nil, for: .allEvents)
     }
 
-    final class Coordinator: NSObject {
+    @MainActor final class Coordinator: NSObject {
         var parent: PrivateMessageField
         init(_ parent: PrivateMessageField) { self.parent = parent }
         @objc func changed(_ field: UITextField) { parent.text = field.text ?? "" }

@@ -161,9 +161,26 @@ enum MessagingError: Error {
 
     func sendCallSignal(_ signal: CallSignal, in id: UUID) async throws {
         try signal.validate()
-        try await sendContent(MessageContent(id: UUID(), text: "", image: nil,
-                                              reactionTarget: nil, reaction: nil,
-                                              callSignal: signal), in: id)
+        let generation = vault.chatGeneration
+        // Receive polling and text sends share the same ratchet. Wait for its
+        // current transaction; never run concurrent mutations or drop ICE as busy.
+        while working {
+            try check(id, generation: generation)
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        try check(id, generation: generation)
+        working = true
+        defer { working = false }
+        let content = MessageContent(id: UUID(), text: "", callSignal: signal)
+        // Persist the advanced ratchet, but never retry an abandoned call from
+        // the durable message outbox. Lost signaling ends the current call.
+        let encrypted = try enqueueContent(content, in: id, persistMessage: false)
+        try await login()
+        try check(id, generation: generation)
+        _ = try await gateway.sendEnvelope(roomID: encrypted.chat.roomID!,
+            recipientDevice: encrypted.chat.remoteDeviceID!, kind: "message",
+            ciphertext: encrypted.wire, messageID: content.id.uuidString)
+        try check(id, generation: generation)
     }
 
     func sendGroupContent(_ content: MessageContent, in id: UUID) async throws {
@@ -189,7 +206,7 @@ enum MessagingError: Error {
         defer { working = false }
         let generation = vault.chatGeneration
         try check(id, generation: generation)
-        let chat = try enqueueContent(content, in: id)
+        let chat = try enqueueContent(content, in: id).chat
         // No protocol store or private key reference is carried over an await.
         do {
             try await login()
@@ -200,7 +217,8 @@ enum MessagingError: Error {
         }
     }
 
-    private func enqueueContent(_ content: MessageContent, in id: UUID) throws -> StoredChat {
+    private func enqueueContent(_ content: MessageContent, in id: UUID,
+                                persistMessage: Bool = true) throws -> (chat: StoredChat, wire: Data) {
         let chat = try metadata(for: id)
         guard let bundle = try vault.pendingPeerBundle(for: id) else {
             throw MessagingError.unavailable
@@ -227,10 +245,10 @@ enum MessagingError: Error {
                                     reaction: content.reaction, groupID: content.groupID,
                                     senderDeviceID: vault.deviceID, callSignal: content.callSignal)
         state = store.state
-        try vault.commitChat(state: state, message: message, for: id)
+        try vault.commitChat(state: state, message: persistMessage ? message : nil, for: id)
         // Persist the exact wire bytes together with the advanced ratchet before
         // upload. Retries must reuse both these bytes and this stable ID.
-        return chat
+        return (chat, wire)
     }
 
     func receive(in id: UUID) async throws {
@@ -328,7 +346,9 @@ enum MessagingError: Error {
         guard let roomID = chat.roomID, let remote = chat.remoteDeviceID else {
             throw MessagingError.localChatOnly
         }
-        let pending = vault.messageRecords.filter { $0.isOutgoing && $0.delivery == .sending }
+        let pending = vault.messageRecords.filter {
+            $0.isOutgoing && $0.delivery == .sending && $0.callSignal == nil
+        }
             .map { ($0.id, $0.ciphertext) }
         for (messageID, ciphertext) in pending {
             try check(id, generation: generation)
