@@ -1,9 +1,10 @@
 import SwiftUI
 import PDFKit
 import UIKit
+import AVFoundation
 
 struct PrivateAttachment: Codable, Equatable, Identifiable {
-    enum Format: String, Codable { case text, pdf }
+    enum Format: String, Codable { case text, pdf, audio, video }
     var id: String { name }
     let name: String
     let format: Format
@@ -31,11 +32,16 @@ struct PrivateAttachment: Codable, Equatable, Identifiable {
                     throw MessagingError.invalidMessage
                 }
             }
+        case .audio:
+            let audio = try AVAudioPlayer(data: data)
+            guard audio.duration.isFinite, audio.duration > 0, audio.duration <= 60 else { throw MessagingError.invalidMessage }
+        case .video:
+            guard data.count >= 12, data.subdata(in: 4..<8) == Data("ftyp".utf8) else { throw MessagingError.invalidMessage }
         }
     }
 
     static func read(_ url: URL) throws -> Self {
-        guard url.isFileURL, ["txt", "pdf"].contains(url.pathExtension.lowercased()) else {
+        guard url.isFileURL, ["txt", "pdf", "wav", "m4a", "mp3", "mp4", "mov"].contains(url.pathExtension.lowercased()) else {
             throw MessagingError.invalidMessage
         }
         let accessed = url.startAccessingSecurityScopedResource()
@@ -51,8 +57,9 @@ struct PrivateAttachment: Codable, Equatable, Identifiable {
                 let input = try FileHandle(forReadingFrom: file)
                 defer { try? input.close() }
                 let data = try input.read(upToCount: maxBytes + 1) ?? Data()
-                let attachment = Self(name: url.lastPathComponent,
-                    format: url.pathExtension.lowercased() == "pdf" ? .pdf : .text, data: data)
+                let ext = url.pathExtension.lowercased()
+                let format: Format = ext == "pdf" ? .pdf : ext == "txt" ? .text : ["mp4", "mov"].contains(ext) ? .video : .audio
+                let attachment = Self(name: url.lastPathComponent, format: format, data: data)
                 try attachment.validate()
                 return attachment
             }
@@ -86,7 +93,7 @@ struct PrivateAttachmentView: View {
                 if attachment.format == .text {
                     Text(String(data: attachment.data, encoding: .utf8) ?? "")
                         .textSelection(.disabled).frame(maxWidth: .infinity, alignment: .leading).padding()
-                } else {
+                } else if attachment.format == .pdf {
                     LazyVStack {
                         ForEach(0..<(PDFDocument(data: attachment.data)?.pageCount ?? 0), id: \.self) { index in
                             if let image = pageImage(index) {
@@ -95,6 +102,8 @@ struct PrivateAttachmentView: View {
                             }
                         }
                     }
+                } else {
+                    PrivateMediaPlaybackView(file: attachment)
                 }
             }
         }.background(Palette.background).foregroundStyle(Palette.text)

@@ -190,7 +190,7 @@ struct GroupConversationView: View {
                 Button {
                     fileGeneration = vault.chatGeneration; filePicker = true
                 } label: { Image(systemName: "doc.badge.plus").frame(minWidth: 44, minHeight: 44) }
-                    .disabled(!group.ready || group.working).accessibilityLabel("Attach PDF or text file")
+                    .disabled(!group.ready || group.working).accessibilityLabel("Attach file or short media clip")
             }.padding(12).background(Palette.surface, in: RoundedRectangle(cornerRadius: 24)).padding(.horizontal)
             if drawer {
                 StickerDrawer(id: id, insert: { draft += $0 }, sendSticker: { sticker in
@@ -221,7 +221,7 @@ struct GroupConversationView: View {
             .sheet(isPresented: $changePassword) { ChangeChatPasswordView(id: id) }
             .sheet(item: $viewedFile) { file in PrivateAttachmentView(attachment: file) { viewedFile = nil } }
             .sheet(isPresented: $filePicker) {
-                StickerPackPicker(allowedTypes: [.pdf, .plainText]) { result in
+                StickerPackPicker(allowedTypes: [.pdf, .plainText, .wav, .mpeg4Audio, .mp3, .mpeg4Movie, .quickTimeMovie]) { result in
                     filePicker = false
                     guard vault.unlockedChatID == id, vault.chatGeneration == fileGeneration else { return }
                     do {
@@ -230,7 +230,7 @@ struct GroupConversationView: View {
                             do { try await group.sendFile(file) }
                             catch { status = "File saved for retry or unavailable" }
                         }
-                    } catch { status = "Choose a TXT or PDF file up to 512 KB and 20 PDF pages." }
+                    } catch { status = "Choose a supported file up to 512 KB: TXT, PDF, WAV, M4A, MP3, MP4 or MOV." }
                 }
             }
             .confirmationDialog("Removing this member closes the group to new messages. Cached history remains locked by its password.",

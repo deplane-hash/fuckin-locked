@@ -695,7 +695,10 @@ private struct ConversationView: View {
                                     }.accessibilityLabel("View image")
                                 }
                                 if let file = message.file {
-                                    Button { viewedFile = file } label: {
+                                    Button {
+                                        if file.format == .audio || file.format == .video { callController?.stop() }
+                                        viewedFile = file
+                                    } label: {
                                         Label(file.name, systemImage: "doc").padding(10)
                                     }.accessibilityLabel("Open attachment \(file.name)")
                                 }
@@ -796,12 +799,12 @@ private struct ConversationView: View {
         }
         .confirmationDialog("Attachment", isPresented: $attachmentChoices) {
             Button("Photo or GIF") { photoPicker = true }
-            Button("PDF or text file") { fileGeneration = vault.chatGeneration; filePicker = true }
+            Button("File or short media clip") { fileGeneration = vault.chatGeneration; filePicker = true }
         }
         .photosPicker(isPresented: $photoPicker, selection: $selectedPhoto, matching: .images, preferredItemEncoding: .current)
         .sheet(item: $viewedFile) { file in PrivateAttachmentView(attachment: file) { viewedFile = nil } }
         .sheet(isPresented: $filePicker) {
-            StickerPackPicker(allowedTypes: [.pdf, .plainText]) { result in
+            StickerPackPicker(allowedTypes: [.pdf, .plainText, .wav, .mpeg4Audio, .mp3, .mpeg4Movie, .quickTimeMovie]) { result in
                 filePicker = false
                 guard vault.unlockedChatID == id, vault.chatGeneration == fileGeneration else { return }
                 do {
@@ -810,7 +813,7 @@ private struct ConversationView: View {
                         do { try await messaging.sendFile(file, in: id) }
                         catch { status = "File saved for retry or unavailable" }
                     }
-                } catch { status = "Choose a TXT or PDF file up to 512 KB and 20 PDF pages." }
+                } catch { status = "Choose a supported file up to 512 KB: TXT, PDF, WAV, M4A, MP3, MP4 or MOV." }
             }
         }
         .onChange(of: selectedPhoto) { _, item in
