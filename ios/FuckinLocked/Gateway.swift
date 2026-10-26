@@ -109,6 +109,7 @@ struct RelayPrekeyBundle: Codable {
     private let identityAccount: String
     private let diagnostics: ((Int) -> Void)?
     private var token: String?
+    private var authenticatedDevice = ""
     private var generation = 0
     private var session = makeGatewaySession()
 
@@ -147,6 +148,7 @@ struct RelayPrekeyBundle: Codable {
 
     private func request<T: Decodable>(_ path: String, method: String = "GET", body: [String: Any]? = nil) async throws -> T {
         let started = generation
+        let requestToken = token
         guard let url = endpoint(path) else { throw ConnectionError.unavailable }
         var request = URLRequest(url: url)
         request.httpMethod = method
@@ -155,11 +157,12 @@ struct RelayPrekeyBundle: Codable {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
-        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        if let requestToken { request.setValue("Bearer \(requestToken)", forHTTPHeaderField: "Authorization") }
         do {
             let (data, response) = try await session.data(for: request)
             diagnostics?((response as? HTTPURLResponse)?.statusCode ?? -1)
             guard started == generation else { throw ConnectionError.unavailable }
+            if (response as? HTTPURLResponse)?.statusCode == 401 && token == requestToken { token = nil; authenticatedDevice = "" }
             guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
                 throw ConnectionError.unavailable
             }
@@ -213,16 +216,29 @@ struct RelayPrekeyBundle: Codable {
     func login(deviceID: String) async throws {
         let started = generation
         guard !deviceID.isEmpty else { throw ConnectionError.unavailable }
-        let key = try DeviceIdentity.load(account: identityAccount)
+        if token != nil && authenticatedDevice == deviceID { return }
         let challenge: Challenge = try await request("/v1/auth/challenge", method: "POST", body: ["device_id": deviceID])
         let input = Data("fuckin-locked-login-v1:\(deviceID):\(challenge.challenge)".utf8)
-        let signature = try key.signature(for: input)
+        let signature = try signChallenge(input)
         let result: SessionToken = try await request("/v1/auth/session", method: "POST", body: [
             "device_id": deviceID, "challenge": challenge.challenge,
-            "signature": signature.base64EncodedString()
+            "signature": signature
         ])
         guard started == generation else { throw ConnectionError.unavailable }
         token = result.token
+        do {
+            let _: [String: String] = try await request("/v1/devices/features", method: "POST", body: ["features": ["rich_content_v2"]])
+            guard started == generation else { throw ConnectionError.unavailable }
+            authenticatedDevice = deviceID
+        } catch {
+            if started == generation { token = nil; authenticatedDevice = "" }
+            throw error
+        }
+    }
+
+    private func signChallenge(_ input: Data) throws -> String {
+        let key = try DeviceIdentity.load(account: identityAccount)
+        return try key.signature(for: input).base64EncodedString()
     }
 
     func people() async throws -> [Person] {
@@ -261,6 +277,11 @@ struct RelayPrekeyBundle: Codable {
     func inboxActivity() async throws -> Set<String> {
         let result: [String: [String]] = try await request("/v1/inbox/activity")
         return Set(result["rooms"] ?? [])
+    }
+
+    func peerSupportsRichContent(room: String, device: String) async throws -> Bool {
+        let result: [String: [String]] = try await request("/v1/rooms/\(room)/devices/\(device)/features")
+        return result["features"]?.contains("rich_content_v2") == true
     }
 
     func updateProfile(name: String, username: String) async throws -> AccountProfile {
@@ -443,6 +464,7 @@ struct RelayPrekeyBundle: Codable {
         session.invalidateAndCancel()
         session = makeGatewaySession()
         token = nil
+        authenticatedDevice = ""
         connected = false
     }
 }

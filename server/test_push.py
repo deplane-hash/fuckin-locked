@@ -144,3 +144,25 @@ class PushTests(unittest.TestCase):
         self.assertEqual(service.inbox_activity(self.db, self.peer), {"rooms": []})
         service.revoke_device(self.db, self.peer, self.peer["device_id"])
         with self.assertRaises(service.Error): service.inbox_activity(self.db, self.peer)
+
+    def test_feature_claims_are_private_reset_on_login_and_rejected_after_revocation(self):
+        self.assertEqual(service.peer_features(self.db, self.actor, self.room, self.peer["device_id"]), {"features": []})
+        service.register_features(self.db, self.peer, ["rich_content_v2"])
+        self.assertEqual(service.peer_features(self.db, self.actor, self.room, self.peer["device_id"]), {"features": ["rich_content_v2"]})
+        stored = self.db.execute("SELECT features FROM device_features").fetchone()[0]
+        self.assertNotIn(b"rich_content_v2", stored)
+        with self.assertRaises(service.Error): service.peer_features(self.db, self.actor, "missing-room", self.peer["device_id"])
+        with self.assertRaises(service.Error): service.register_features(self.db, self.peer, ["disable_locks"])
+        service.issue_session(self.db, self.peer["device_id"]); self.db.commit()
+        self.assertEqual(service.peer_features(self.db, self.actor, self.room, self.peer["device_id"]), {"features": []})
+        service.revoke_device(self.db, self.peer, self.peer["device_id"])
+        with self.assertRaises(service.Error): service.register_features(self.db, self.peer, ["rich_content_v2"])
+
+    def test_session_retention_is_bounded_without_deleting_messages(self):
+        self.enqueue()
+        tokens = [service.issue_session(self.db, self.actor["device_id"]) for _ in range(12)]
+        self.db.commit()
+        self.assertLessEqual(self.db.execute("SELECT count(*) FROM sessions WHERE device_id=?", (self.actor["device_id"],)).fetchone()[0], 8)
+        with self.assertRaises(service.Error): service.active_session(self.db, tokens[0])
+        self.assertEqual(service.active_session(self.db, tokens[-1])["device_id"], self.actor["device_id"])
+        self.assertEqual(self.db.execute("SELECT count(*) FROM envelopes").fetchone()[0], 1)

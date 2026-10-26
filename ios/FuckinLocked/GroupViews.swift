@@ -164,6 +164,9 @@ struct GroupConversationView: View {
                 }.padding(.horizontal)
             }
             if group.closed { Text("This roster changed. Create a new group to continue securely.").font(.footnote) }
+            if group.requiresPeerUpdate {
+                Text("Saved files and GIFs are waiting for every member to open the latest app.").font(.caption)
+            }
             if !status.isEmpty { Text(status).font(.caption).foregroundStyle(Palette.muted) }
             HStack(spacing: 12) {
                 Button { drawer.toggle() } label: { Image(systemName: "face.smiling") }

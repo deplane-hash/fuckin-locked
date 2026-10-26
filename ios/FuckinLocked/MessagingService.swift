@@ -11,11 +11,13 @@ enum MessagingError: Error {
     case unexpectedSender
     case busy
     case queued
+    case peerUpdateRequired
 }
 
 @MainActor final class MessagingService: ObservableObject {
     @Published private(set) var pendingFingerprints: [UUID: String] = [:]
     @Published private(set) var working = false
+    @Published private(set) var peersNeedingUpdate: Set<UUID> = []
 
     private let vault: LocalVault
     private let gateway: Gateway
@@ -40,6 +42,7 @@ enum MessagingError: Error {
 
     func clearTransientState() {
         pendingFingerprints.removeAll(keepingCapacity: false)
+        peersNeedingUpdate.removeAll(keepingCapacity: false)
     }
 
     private func metadata(for id: UUID) throws -> StoredChat {
@@ -270,7 +273,8 @@ enum MessagingError: Error {
             let fingerprint = try await prepare(id, generation: generation)
             throw MessagingError.identityVerificationRequired(fingerprint)
         }
-        try await flushOutbox(in: id, chat: chat, generation: generation)
+        do { try await flushOutbox(in: id, chat: chat, generation: generation) }
+        catch MessagingError.peerUpdateRequired { } // Keep receiving older compatible messages.
         let envelopes = try await gateway.pendingEnvelopes(roomID: chat.roomID!)
         try check(id, generation: generation)
         for envelope in envelopes {
@@ -353,9 +357,19 @@ enum MessagingError: Error {
         let pending = vault.messageRecords.filter {
             $0.isOutgoing && $0.delivery == .sending && $0.callSignal == nil
         }
-            .map { ($0.id, $0.ciphertext) }
-        for (messageID, ciphertext) in pending {
+            .map { ($0.id, $0.ciphertext, $0.file != nil || ($0.image.map(PrivateImage.isAnimated) ?? false)) }
+        var checkedRichContent = false
+        for (messageID, ciphertext, richContent) in pending {
             try check(id, generation: generation)
+            if richContent && !checkedRichContent {
+                let supported = try await gateway.peerSupportsRichContent(room: roomID, device: remote)
+                try check(id, generation: generation)
+                guard supported else {
+                    peersNeedingUpdate.insert(id)
+                    throw MessagingError.peerUpdateRequired
+                }
+                peersNeedingUpdate.remove(id); checkedRichContent = true
+            }
             guard let wire = ciphertext else { throw MessagingError.invalidMessage }
             let envelopeID = try await gateway.sendEnvelope(roomID: roomID,
                 recipientDevice: remote, kind: "message", ciphertext: wire,

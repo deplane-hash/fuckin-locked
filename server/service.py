@@ -129,6 +129,8 @@ def connect(path: str = DB_PATH) -> sqlite3.Connection:
       UNIQUE(group_id,left_device,right_device));
     CREATE TABLE IF NOT EXISTS push_tokens(
       device_id TEXT PRIMARY KEY REFERENCES devices(id), token BLOB NOT NULL);
+    CREATE TABLE IF NOT EXISTS device_features(
+      device_id TEXT PRIMARY KEY REFERENCES devices(id), features BLOB NOT NULL);
     CREATE TABLE IF NOT EXISTS push_queue(
       device_id TEXT PRIMARY KEY REFERENCES devices(id), generation INTEGER NOT NULL,
       next_attempt INTEGER NOT NULL, attempts INTEGER NOT NULL, expires_at INTEGER NOT NULL);
@@ -188,8 +190,35 @@ def update_profile(db: sqlite3.Connection, actor: sqlite3.Row, name: str, userna
 
 def issue_session(db: sqlite3.Connection, device_id: str) -> str:
     token = secrets.token_urlsafe(32)
+    now = int(time.time())
+    db.execute("DELETE FROM sessions WHERE expires_at<=?", (now,))
+    # A newly authenticated old client cannot inherit a newer client's claims.
+    db.execute("DELETE FROM device_features WHERE device_id=?", (device_id,))
     db.execute("INSERT INTO sessions VALUES(?,?,?,NULL)", (digest(token), device_id, int(time.time()) + 30 * 86400))
+    db.execute("""DELETE FROM sessions WHERE device_id=? AND token_hash NOT IN
+        (SELECT token_hash FROM sessions WHERE device_id=? ORDER BY rowid DESC LIMIT 8)""", (device_id, device_id))
     return token
+
+
+def register_features(db: sqlite3.Connection, actor: sqlite3.Row, features: list) -> dict:
+    require(isinstance(features, list) and len(features) <= 1 and all(value == "rich_content_v2" for value in features))
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        require(db.execute("SELECT 1 FROM devices WHERE id=? AND state='active'", (actor["device_id"],)).fetchone() is not None,
+                401, "Authentication required")
+        db.execute("INSERT OR REPLACE INTO device_features VALUES(?,?)",
+            (actor["device_id"], protect(json.dumps(features), "features:" + actor["device_id"])))
+        db.commit()
+    except Exception:
+        db.rollback(); raise
+    return {"state": "registered"}
+
+
+def peer_features(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, device_id: str) -> dict:
+    require(_room_device_authorized(db, room_id, actor["device_id"]) and _room_device_authorized(db, room_id, device_id),
+            403, "Not authorized")
+    row = db.execute("SELECT features FROM device_features WHERE device_id=?", (device_id,)).fetchone()
+    return {"features": json.loads(reveal(row[0], "features:" + device_id)) if row else []}
 
 
 def create_invitation(db: sqlite3.Connection, creator: str, ttl: int = 86400) -> str:
@@ -293,6 +322,7 @@ def revoke_device(db: sqlite3.Connection, actor: sqlite3.Row, device_id: str) ->
                    (int(time.time()), device_id))
         db.execute("DELETE FROM envelopes WHERE recipient_device=? AND delivered_at IS NULL", (device_id,))
         db.execute("DELETE FROM push_tokens WHERE device_id=?", (device_id,))
+        db.execute("DELETE FROM device_features WHERE device_id=?", (device_id,))
         db.execute("DELETE FROM push_queue WHERE device_id=?", (device_id,))
         db.execute("DELETE FROM prekey_bundles WHERE device_id=?", (device_id,))
         db.execute("DELETE FROM prekey_claims WHERE target_device=? OR requester_device=?", (device_id, device_id))
@@ -736,6 +766,10 @@ class Handler(BaseHTTPRequestHandler):
                 return register_push(db, actor, data["token"])
             if self.command == "GET" and path == "/v1/inbox/activity":
                 return inbox_activity(db, actor)
+            if self.command == "POST" and path == "/v1/devices/features":
+                return register_features(db, actor, data["features"])
+            if self.command == "GET" and len(parts) == 6 and parts[:2] == ["v1", "rooms"] and parts[3] == "devices" and parts[5] == "features":
+                return peer_features(db, actor, parts[2], parts[4])
             if self.command == "GET" and path == "/v1/calls/turn":
                 return turn_configuration()
             if self.command == "POST" and path == "/v1/groups":

@@ -737,6 +737,10 @@ private struct ConversationView: View {
             if !status.isEmpty, vault.chats.first(where: { $0.id == id })?.roomID != nil {
                 Text(status).font(.caption).foregroundStyle(Palette.muted)
             }
+            if messaging.peersNeedingUpdate.contains(id) {
+                Text("Saved files and GIFs will send after your friend opens the latest app.")
+                    .font(.caption).foregroundStyle(Palette.muted)
+            }
             if let callController { VoiceCallStatus(controller: callController) }
             HStack(spacing: 12) {
                 Button { drawer.toggle() } label: { Image(systemName: "face.smiling") }
@@ -987,7 +991,7 @@ struct StickerDrawer: View {
                 Text("GIFs").tag("GIFs")
                 Text("Emoji").tag("Emoji")
             }.pickerStyle(.segmented)
-            Picker("Emoji collection", selection: $selected) {
+            Picker("Collection", selection: $selected) {
                 ForEach(["All", "Recent", "Favorites"], id: \.self) { Text($0) }
             }.pickerStyle(.segmented)
             if tab != "Emoji" {

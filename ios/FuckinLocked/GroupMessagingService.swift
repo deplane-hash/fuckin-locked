@@ -50,6 +50,7 @@ enum GroupMessagingError: Error { case closed, verificationRequired }
     @Published private(set) var closed = false
     @Published private(set) var members: [GroupMember] = []
     @Published private(set) var ownerUserID = ""
+    @Published private(set) var requiresPeerUpdate = false
 
     var ready: Bool { !closed && !peers.isEmpty && peers.allSatisfy(\.verified) }
     private let id: UUID
@@ -212,6 +213,7 @@ enum GroupMessagingError: Error { case closed, verificationRequired }
 
     private func rebuild() {
         guard vault.unlockedChatID == id else { lock(); return }
+        requiresPeerUpdate = transports.values.contains { $0.messaging.peersNeedingUpdate.contains($0.chatID) }
         peers = members.filter { $0.device_id != vault.deviceID }.map { member in
             let transport = transports[member.device_id]
             return GroupPeerCheck(id: member.device_id, name: member.name,
@@ -269,6 +271,7 @@ enum GroupMessagingError: Error { case closed, verificationRequired }
         peers.removeAll(keepingCapacity: false)
         members.removeAll(keepingCapacity: false)
         ownerUserID = ""
+        requiresPeerUpdate = false
     }
 
     func close() {
