@@ -58,6 +58,10 @@ final class LockLifecycleTests: XCTestCase {
         declinePasswordStorageIfPresented(app)
         let compose = app.buttons["Compose"]
         XCTAssertTrue(compose.waitForExistence(timeout: 10), "App password creation must open Chats")
+        app.buttons["Calls"].tap()
+        XCTAssertTrue(app.buttons["Open Chats"].waitForExistence(timeout: 5), "Calls must explain encrypted-chat setup without starting media")
+        app.buttons["Open Chats"].tap()
+        XCTAssertTrue(compose.waitForExistence(timeout: 5))
         compose.tap()
         let localDraft = app.buttons["Create a local draft instead"]
         XCTAssertTrue(localDraft.waitForExistence(timeout: 5))

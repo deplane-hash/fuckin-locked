@@ -479,6 +479,16 @@ def send_envelope(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, reci
     return envelope_id
 
 
+def inbox_activity(db: sqlite3.Connection, actor: sqlite3.Row) -> dict:
+    require(db.execute("SELECT 1 FROM devices WHERE id=? AND state='active'",
+                       (actor["device_id"],)).fetchone() is not None, 401, "Authentication required")
+    rows = db.execute("""SELECT DISTINCT e.room_id,COALESCE(l.group_id,e.room_id) display_room
+        FROM envelopes e LEFT JOIN group_links l ON l.room_id=e.room_id
+        WHERE e.recipient_device=? AND e.delivered_at IS NULL""", (actor["device_id"],)).fetchall()
+    return {"rooms": sorted({row["display_room"] for row in rows
+                            if _room_device_authorized(db, row["room_id"], actor["device_id"])})}
+
+
 def envelope_status(db: sqlite3.Connection, actor: sqlite3.Row, envelope_id: str) -> dict:
     row = db.execute("""SELECT e.delivered_at FROM envelopes e
         JOIN devices d ON d.id=e.sender_device JOIN members m ON m.room_id=e.room_id AND m.user_id=d.user_id
@@ -724,6 +734,8 @@ class Handler(BaseHTTPRequestHandler):
                 return {"capabilities": capabilities}
             if self.command == "POST" and path == "/v1/notifications/register":
                 return register_push(db, actor, data["token"])
+            if self.command == "GET" and path == "/v1/inbox/activity":
+                return inbox_activity(db, actor)
             if self.command == "GET" and path == "/v1/calls/turn":
                 return turn_configuration()
             if self.command == "POST" and path == "/v1/groups":

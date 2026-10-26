@@ -258,6 +258,11 @@ struct RelayPrekeyBundle: Codable {
         try await request("/v1/me")
     }
 
+    func inboxActivity() async throws -> Set<String> {
+        let result: [String: [String]] = try await request("/v1/inbox/activity")
+        return Set(result["rooms"] ?? [])
+    }
+
     func updateProfile(name: String, username: String) async throws -> AccountProfile {
         try await request("/v1/me", method: "POST", body: ["name": name, "username": username])
     }

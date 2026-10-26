@@ -135,3 +135,12 @@ class PushTests(unittest.TestCase):
         sender = type("Sender", (), {"send": lambda _, token: send(token)})()
         push.deliver_batch(self.db, service.reveal, sender)
         self.assertEqual(self.db.execute("SELECT generation FROM push_queue").fetchone()[0], 2)
+
+    def test_activity_metadata_is_recipient_scoped_without_content_or_read_receipts(self):
+        envelope = self.enqueue()
+        self.assertEqual(service.inbox_activity(self.db, self.actor), {"rooms": []})
+        self.assertEqual(service.inbox_activity(self.db, self.peer), {"rooms": [self.room]})
+        service.acknowledge_envelope(self.db, self.peer, envelope)
+        self.assertEqual(service.inbox_activity(self.db, self.peer), {"rooms": []})
+        service.revoke_device(self.db, self.peer, self.peer["device_id"])
+        with self.assertRaises(service.Error): service.inbox_activity(self.db, self.peer)

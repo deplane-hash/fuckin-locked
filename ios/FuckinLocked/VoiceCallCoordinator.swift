@@ -11,6 +11,7 @@ import UIKit
 
 struct VoiceCallControls: View {
     @ObservedObject var controller: VoiceCallCoordinator
+    let canStart: Bool
 
     var body: some View {
         if controller.hasIncomingOffer {
@@ -26,6 +27,7 @@ struct VoiceCallControls: View {
                 Image(systemName: controller.isActive ? "phone.down.fill" : "phone")
             }
             .accessibilityLabel(controller.isActive ? "End voice call" : "Start voice call")
+            .disabled(!controller.isActive && !canStart)
         }
     }
 }

@@ -181,6 +181,12 @@ jobs:
           profile_uuid=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$signing_dir/profile.plist")
           profile_name=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$signing_dir/profile.plist")
           profile_team=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$signing_dir/profile.plist")
+          push_environment=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:aps-environment' "$signing_dir/profile.plist" 2>/dev/null || true)
+          /usr/libexec/PlistBuddy -c 'Clear dict' "$signing_dir/device-entitlements.plist"
+          if [ -n "$push_environment" ]; then
+            case "$push_environment" in production|development) ;; *) exit 1 ;; esac
+            /usr/libexec/PlistBuddy -c "Add :aps-environment string $push_environment" "$signing_dir/device-entitlements.plist"
+          fi
           bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$signing_dir/profile.plist")
           bundle_id="${bundle_id#*.}"
           test "$profile_team" = "$APPLE_TEAM_ID"
@@ -211,6 +217,7 @@ jobs:
             PRODUCT_BUNDLE_IDENTIFIER="$bundle_id" \
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             PROVISIONING_PROFILE_SPECIFIER="$profile_name" \
+            CODE_SIGN_ENTITLEMENTS="$signing_dir/device-entitlements.plist" \
             CODE_SIGNING_ALLOWED=YES \
             CODE_SIGNING_REQUIRED=YES \
             -quiet

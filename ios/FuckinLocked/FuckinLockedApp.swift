@@ -209,9 +209,9 @@ private extension View {
 }
 
 private enum Destination: String, CaseIterable {
-    case chats = "Chats", people = "People", you = "You"
+    case chats = "Chats", calls = "Calls", people = "People", you = "You"
     var symbol: String {
-        switch self { case .chats: "bubble.left.and.bubble.right"; case .people: "person.2"; case .you: "person.crop.circle" }
+        switch self { case .chats: "bubble.left.and.bubble.right"; case .calls: "phone"; case .people: "person.2"; case .you: "person.crop.circle" }
     }
 }
 
@@ -224,6 +224,7 @@ private struct MainView: View {
             Group {
                 switch selected {
                 case .chats: ChatsView()
+                case .calls: CallsView(openChats: { selected = .chats })
                 case .people: PeopleView()
                 case .you: YouView()
                 }
@@ -255,8 +256,48 @@ private struct MainView: View {
     }
 }
 
+private struct CallsView: View {
+    @EnvironmentObject private var vault: LocalVault
+    let openChats: () -> Void
+    private var eligible: [StoredChat] {
+        vault.chats.filter { !$0.isGroup && $0.roomID != nil && $0.remoteDeviceID != nil }
+    }
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Calls").font(.largeTitle.bold())
+                Text("Unlock a verified one-to-one chat to call. Keep that chat open on both phones to receive the call.")
+                    .font(.subheadline).foregroundStyle(Palette.muted)
+                if eligible.isEmpty {
+                    Text("Create an encrypted chat before calling").foregroundStyle(Palette.muted)
+                    PrimaryButton(title: "Open Chats", action: openChats)
+                }
+                ForEach(eligible) { chat in
+                    NavigationLink(value: chat.id) {
+                        HStack(spacing: 14) {
+                            Text(String(chat.title.prefix(1))).font(.headline)
+                                .frame(width: 48, height: 48).background(Palette.surface, in: Circle())
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(chat.title).font(.headline)
+                                Text("Unlock to call").font(.subheadline).foregroundStyle(Palette.muted)
+                            }
+                            Spacer()
+                            Image(systemName: "phone").foregroundStyle(Palette.lime)
+                        }.padding(.vertical, 8)
+                    }
+                    Divider()
+                }
+            }.padding(22)
+        }.navigationDestination(for: UUID.self) { ChatGateView(id: $0) }
+            .background(Palette.background).foregroundStyle(Palette.text)
+            .toolbar(.hidden, for: .navigationBar)
+    }
+}
+
 private struct ChatsView: View {
     @EnvironmentObject var vault: LocalVault
+    @EnvironmentObject var gateway: Gateway
+    @State private var activityRooms: Set<String> = []
     @State private var search = ""
     @State private var groupsOnly = false
     @State private var compose = false
@@ -305,6 +346,10 @@ private struct ChatsView: View {
                                 Text("Message hidden").foregroundStyle(Palette.muted).font(.subheadline)
                             }
                             Spacer()
+                            if let room = chat.roomID, activityRooms.contains(room) {
+                                Circle().fill(Palette.lime).frame(width: 7, height: 7)
+                                    .accessibilityLabel("New activity")
+                            }
                             Image(systemName: "lock.fill").foregroundStyle(Palette.muted).font(.caption)
                         }.padding(.vertical, 8)
                     }
@@ -318,7 +363,19 @@ private struct ChatsView: View {
         .background(Palette.background)
         .foregroundStyle(Palette.text)
         .toolbar(.hidden, for: .navigationBar)
-        .onDisappear { search = "" }
+        .task(id: vault.deviceID) {
+            guard !vault.deviceID.isEmpty else { return }
+            while !Task.isCancelled && vault.isUnlocked {
+                do {
+                    try await gateway.login(deviceID: vault.deviceID)
+                    let rooms = try await gateway.inboxActivity()
+                    guard vault.isUnlocked, !Task.isCancelled else { return }
+                    activityRooms = rooms
+                } catch { }
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            }
+        }
+        .onDisappear { search = ""; activityRooms = [] }
     }
 
     private func filter(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -578,7 +635,7 @@ private struct ConversationView: View {
                 Spacer()
                 if let chat = try? vault.chatMetadata(for: id), !chat.isGroup,
                    let callController {
-                    VoiceCallControls(controller: callController)
+                    VoiceCallControls(controller: callController, canStart: verified && !identityMismatch)
                 }
                 Button { showChangePassword = true } label: { Image(systemName: "key") }
                     .accessibilityLabel("Change chat password")
@@ -1064,7 +1121,7 @@ private struct PeopleView: View {
                 PrimaryButton(title: "Invite a friend") {
                     Task { do { invitation = try await gateway.invite() }
                         catch { self.error = "Can't connect" } }
-                }
+                }.disabled(vault.deviceID.isEmpty)
                 if !admissions.isEmpty { Text("Approval requests").font(.headline) }
                 ForEach(admissions) { admission in
                     HStack {
@@ -1099,12 +1156,16 @@ private struct PeopleView: View {
         .background(Palette.background).foregroundStyle(Palette.text)
         .task(id: vault.deviceID) {
             guard !vault.deviceID.isEmpty else { error = "Finish your invitation to connect"; return }
-            do {
-                try await gateway.login(deviceID: vault.deviceID)
-                people = try await gateway.people()
-                admissions = try await gateway.pendingAdmissions()
+            while !Task.isCancelled && vault.isUnlocked {
+                do {
+                    try await gateway.login(deviceID: vault.deviceID)
+                    let approved = try await gateway.people()
+                    let pending = try await gateway.pendingAdmissions()
+                    guard vault.isUnlocked, !Task.isCancelled else { return }
+                    people = approved; admissions = pending; error = ""
+                } catch { self.error = "Can't connect" }
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
             }
-            catch { self.error = "Can't connect" }
         }
         .onDisappear {
             people.removeAll(keepingCapacity: false)
@@ -1120,6 +1181,7 @@ private struct YouView: View {
     @State private var showPrivacy = false
     @State private var showNotifications = false
     @State private var showProfile = false
+    @State private var showInvite = false
     @State private var showDevices = false
     @State private var showEnrollment = false
     @State private var showBootstrap = false
@@ -1150,6 +1212,9 @@ private struct YouView: View {
                     row("Authorized devices", "iphone") { showDevices = true }
                     row("Privacy protections", "hand.raised") { showPrivacy = true }
                     row("Notifications", "bell") { showNotifications = true }
+                    if !vault.deviceID.isEmpty {
+                        row("Invite a friend", "envelope") { showInvite = true }
+                    }
                     if vault.deviceID.isEmpty {
                         row("Use invitation", "envelope") { showEnrollment = true }
                         row("First device setup", "iphone.gen3") { showBootstrap = true }
@@ -1163,6 +1228,7 @@ private struct YouView: View {
         .sheet(isPresented: $showPrivacy) { PrivacyView() }
         .sheet(isPresented: $showNotifications) { NotificationsView() }
         .sheet(isPresented: $showProfile) { ProfilePreferencesView() }
+        .sheet(isPresented: $showInvite) { NavigationStack { PeopleView() } }
         .sheet(isPresented: $showDevices) { DevicesView() }
         .sheet(isPresented: $showEnrollment) { EnrollmentView() }
         .sheet(isPresented: $showBootstrap) { BootstrapView() }

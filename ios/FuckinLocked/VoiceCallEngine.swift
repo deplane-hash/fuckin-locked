@@ -72,6 +72,7 @@ enum VoiceCallError: Error {
         configuration.rtcpMuxPolicy = .require
         configuration.sdpSemantics = .unifiedPlan
 
+        RTCSetMinDebugLogLevel(.none)
         factory = RTCPeerConnectionFactory()
         let constraints = RTCMediaConstraints(mandatoryConstraints: nil,
                                                 optionalConstraints: nil)
