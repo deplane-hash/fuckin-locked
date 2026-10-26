@@ -170,6 +170,7 @@ struct GroupConversationView: View {
             if !status.isEmpty { Text(status).font(.caption).foregroundStyle(Palette.muted) }
             HStack(spacing: 12) {
                 Button { drawer.toggle() } label: { Image(systemName: "face.smiling") }
+                    .frame(minWidth: 44, minHeight: 44)
                     .accessibilityLabel("Stickers and emoji")
                 PrivateMessageField(text: $draft, isEnabled: group.ready).frame(minHeight: 44)
                 Button {
@@ -185,6 +186,7 @@ struct GroupConversationView: View {
                         }
                     }
                 } label: { Image(systemName: "arrow.up.circle.fill") }
+                    .frame(minWidth: 44, minHeight: 44)
                     .disabled(!group.ready || group.working || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityLabel("Send group message")
                 PhotosPicker(selection: $photo, matching: .images, preferredItemEncoding: .current) {

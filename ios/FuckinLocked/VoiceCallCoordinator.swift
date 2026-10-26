@@ -16,8 +16,10 @@ struct VoiceCallControls: View {
     var body: some View {
         if controller.hasIncomingOffer {
             Button("Accept") { Task { await controller.acceptIncoming() } }
+                .frame(minWidth: 44, minHeight: 44)
                 .accessibilityLabel("Accept voice call")
             Button("Decline") { controller.stop() }
+                .frame(minWidth: 44, minHeight: 44)
                 .accessibilityLabel("Decline voice call")
         } else {
             Button {
@@ -27,6 +29,7 @@ struct VoiceCallControls: View {
                 Image(systemName: controller.isActive ? "phone.down.fill" : "phone")
             }
             .accessibilityLabel(controller.isActive ? "End voice call" : "Start voice call")
+            .frame(minWidth: 44, minHeight: 44)
             .disabled(!controller.isActive && !canStart)
         }
     }

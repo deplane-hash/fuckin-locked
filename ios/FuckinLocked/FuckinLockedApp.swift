@@ -310,8 +310,10 @@ private struct ChatsView: View {
                     Text("Chats").font(.largeTitle.bold())
                     Spacer()
                     Button { groupCompose = true } label: { Image(systemName: "person.2.badge.plus").font(.title3) }
+                        .frame(minWidth: 44, minHeight: 44)
                         .accessibilityLabel("Create or join private group")
                     Button { compose = true } label: { Image(systemName: "square.and.pencil").font(.title3) }
+                        .frame(minWidth: 44, minHeight: 44)
                         .accessibilityLabel("Compose")
                 }
                 HStack {
@@ -376,7 +378,7 @@ private struct ChatsView: View {
     }
 
     private func filter(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Text(title).font(.subheadline.weight(.medium)).padding(.horizontal, 17).padding(.vertical, 9) }
+        Button(action: action) { Text(title).font(.subheadline.weight(.medium)).padding(.horizontal, 17).padding(.vertical, 9).frame(minHeight: 44) }
             .foregroundStyle(selected ? Palette.background : Palette.text)
             .background(selected ? Palette.lime : Palette.surface, in: Capsule())
     }
@@ -635,8 +637,10 @@ private struct ConversationView: View {
                     VoiceCallControls(controller: callController, canStart: verified && !identityMismatch)
                 }
                 Button { showChangePassword = true } label: { Image(systemName: "key") }
+                    .frame(minWidth: 44, minHeight: 44)
                     .accessibilityLabel("Change chat password")
                 Button("Lock chat") { callController?.stop(); draft = ""; vault.lockChat() }
+                    .frame(minHeight: 44)
                     .foregroundStyle(Palette.lime)
             }.padding(.horizontal)
             if vault.chats.first(where: { $0.id == id })?.roomID == nil {
@@ -744,6 +748,7 @@ private struct ConversationView: View {
             if let callController { VoiceCallStatus(controller: callController) }
             HStack(spacing: 12) {
                 Button { drawer.toggle() } label: { Image(systemName: "face.smiling") }
+                    .frame(minWidth: 44, minHeight: 44)
                     .accessibilityLabel("Stickers and emoji")
                 PrivateMessageField(text: $draft, isEnabled: verified && !identityMismatch)
                     .frame(minHeight: 44)
@@ -768,6 +773,7 @@ private struct ConversationView: View {
                         }
                     }
                 } label: { Image(systemName: "arrow.up.circle.fill") }
+                    .frame(minWidth: 44, minHeight: 44)
                     .disabled(!verified || messaging.working || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityLabel("Send message")
                 Button { attachmentChoices = true } label: {
@@ -984,6 +990,7 @@ struct StickerDrawer: View {
                 Text(tab).font(.headline)
                 Spacer()
                 Button("Close", action: close)
+                    .frame(minWidth: 44, minHeight: 44)
             }
             TextField("Search locally", text: $search).flField()
             Picker("Content type", selection: $tab) {
@@ -1155,7 +1162,7 @@ private struct PeopleView: View {
                                     people = try await gateway.people()
                                 } catch { self.error = "Can't connect" }
                             }
-                        }.foregroundStyle(Palette.lime)
+                        }.foregroundStyle(Palette.lime).frame(minWidth: 44, minHeight: 44)
                     }.padding(.vertical, 8)
                 }
                 ForEach(people) { person in
@@ -1207,6 +1214,8 @@ private struct YouView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 Text("You").font(.largeTitle.bold())
+                Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
+                    .font(.caption).foregroundStyle(Palette.muted)
                 Text("Messages decrypt only in unlocked chats. Calls require both participants to keep the chat open.")
                     .font(.footnote).foregroundStyle(Palette.muted)
                 HStack(spacing: 14) {
@@ -1526,7 +1535,9 @@ private struct PrivacyView: View {
         "Recording and mirroring hide the app when iOS reports capture. A screenshot can already exist when iOS tells the app about it.",
         "No export or attachment saving controls are provided. A recipient can still transcribe or photograph a screen.",
         "One-to-one messages use the pinned libsignal protocol after you compare and approve the other device's fingerprint. This build is not independently reviewed, and live two-device gateway delivery still needs signed-device testing.",
-        "The service can see membership, devices, delivery timing, and ciphertext sizes. It cannot decrypt ciphertext submitted to its relay.",
+        "The service can see profile names and usernames, membership, devices, software capabilities, push tokens, delivery timing, and ciphertext sizes. It cannot decrypt message or attachment ciphertext.",
+        "Files, images and animations are encrypted in the chat vault. Playback stops when a chat locks. The operating system may retain buffers; guaranteed memory erasure is not promised.",
+        "Incoming calls require your consent and stop when you leave or the app locks. Apple push and system file-provider connections are outside an ordinary app's routing control.",
         "Losing a password or device key can make local history unrecoverable. There is no recovery key held by the service."
     ]
     var body: some View {
