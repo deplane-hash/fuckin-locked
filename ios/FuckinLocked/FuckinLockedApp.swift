@@ -44,6 +44,7 @@ private struct PrivateRootView: View {
     @Environment(\.scenePhase) private var phase
     @Environment(\.isSceneCaptured) private var captured
     @State private var forceCover = false
+    @ObservedObject private var notifications = PrivateNotifications.shared
 
     var body: some View {
             ZStack {
@@ -84,6 +85,12 @@ private struct PrivateRootView: View {
             }
             .onChange(of: vault.unlockedChatID) { _, value in
                 if value == nil { messaging.clearTransientState() }
+            }
+            .task(id: "\(vault.isUnlocked):\(vault.deviceID):\(notifications.revision)") {
+                await notifications.upload(vault: vault, gateway: gateway)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .privateNotificationOpened)) { _ in
+                gateway.disconnect(); vault.lockApp()
             }
     }
 }
@@ -554,6 +561,11 @@ private struct ConversationView: View {
     @State private var ownFingerprint = ""
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var viewedImage: Data?
+    @State private var viewedFile: PrivateAttachment?
+    @State private var attachmentChoices = false
+    @State private var photoPicker = false
+    @State private var filePicker = false
+    @State private var fileGeneration: UInt64 = 0
     @State private var verified = false
     @State private var identityMismatch = false
     @State private var status = ""
@@ -619,15 +631,19 @@ private struct ConversationView: View {
                         HStack {
                             if message.isOutgoing { Spacer(minLength: 36) }
                             VStack(alignment: message.isOutgoing ? .trailing : .leading, spacing: 3) {
-                                if let bytes = message.image, let image = UIImage(data: bytes) {
+                                if let bytes = message.image {
                                     Button { viewedImage = bytes } label: {
-                                        Image(uiImage: image).resizable().scaledToFit()
-                                            .frame(maxWidth: 220, maxHeight: 220)
+                                        PrivateMediaImage(data: bytes).frame(width: 220, height: 220)
                                             .clipShape(RoundedRectangle(cornerRadius: 16))
                                     }.accessibilityLabel("View image")
                                 }
+                                if let file = message.file {
+                                    Button { viewedFile = file } label: {
+                                        Label(file.name, systemImage: "doc").padding(10)
+                                    }.accessibilityLabel("Open attachment \(file.name)")
+                                }
                                 if !message.body.isEmpty {
-                                    Text(message.body).padding(11)
+                                    Text(message.body).font(vault.preferences.largerMessages ? .title3 : .body).padding(11)
                                         .foregroundStyle(message.isOutgoing ? Palette.background : Palette.text)
                                         .background(message.isOutgoing ? Palette.lime : Palette.surface,
                                                     in: RoundedRectangle(cornerRadius: 16))
@@ -693,10 +709,9 @@ private struct ConversationView: View {
                 } label: { Image(systemName: "arrow.up.circle.fill") }
                     .disabled(!verified || messaging.working || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityLabel("Send message")
-                PhotosPicker(selection: $selectedPhoto, matching: .images,
-                             preferredItemEncoding: .current) {
+                Button { attachmentChoices = true } label: {
                     Image(systemName: "paperclip").frame(minWidth: 44, minHeight: 44)
-                }.disabled(!verified || messaging.working).accessibilityLabel("Attach image")
+                }.disabled(!verified || messaging.working).accessibilityLabel("Attach media or file")
             }.padding(14).background(Palette.surface, in: RoundedRectangle(cornerRadius: 24))
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("message-composer")
@@ -712,14 +727,33 @@ private struct ConversationView: View {
         }
         .background(Palette.background).foregroundStyle(Palette.text)
         .overlay {
-            if let viewedImage, let image = UIImage(data: viewedImage) {
+            if let viewedImage {
                 VStack {
                     Button("Close image") { self.viewedImage = nil }.padding()
                     Spacer()
-                    Image(uiImage: image).resizable().scaledToFit().accessibilityLabel("Message image")
+                    PrivateMediaImage(data: viewedImage).accessibilityLabel("Message image")
                     Spacer()
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Palette.background).ignoresSafeArea(edges: .bottom)
+            }
+        }
+        .confirmationDialog("Attachment", isPresented: $attachmentChoices) {
+            Button("Photo or GIF") { photoPicker = true }
+            Button("PDF or text file") { fileGeneration = vault.chatGeneration; filePicker = true }
+        }
+        .photosPicker(isPresented: $photoPicker, selection: $selectedPhoto, matching: .images, preferredItemEncoding: .current)
+        .sheet(item: $viewedFile) { file in PrivateAttachmentView(attachment: file) { viewedFile = nil } }
+        .sheet(isPresented: $filePicker) {
+            StickerPackPicker(allowedTypes: [.pdf, .plainText]) { result in
+                filePicker = false
+                guard vault.unlockedChatID == id, vault.chatGeneration == fileGeneration else { return }
+                do {
+                    let file = try PrivateAttachment.read(result.get())
+                    Task {
+                        do { try await messaging.sendFile(file, in: id) }
+                        catch { status = "File saved for retry or unavailable" }
+                    }
+                } catch { status = "Choose a TXT or PDF file up to 512 KB and 20 PDF pages." }
             }
         }
         .onChange(of: selectedPhoto) { _, item in
@@ -730,7 +764,7 @@ private struct ConversationView: View {
                 do {
                     guard let bytes = try await item.loadTransferable(type: Data.self),
                           vault.chatGeneration == generation else { return }
-                    let image = try PrivateImage.importImage(bytes)
+                    let image = try PrivateImage.importMedia(bytes)
                     try await messaging.sendImage(image, in: id)
                 } catch {
                     guard vault.chatGeneration == generation else { return }
@@ -794,7 +828,7 @@ private struct ConversationView: View {
         }
         .onDisappear {
             draft = ""; fingerprint = ""; ownFingerprint = ""; drawer = false
-            selectedPhoto = nil; viewedImage = nil; callController?.close()
+            selectedPhoto = nil; viewedImage = nil; viewedFile = nil; callController?.close()
             callController = nil; vault.lockChat()
         }
     }
@@ -869,6 +903,7 @@ struct StickerDrawer: View {
         } : allStickers
         return source.filter {
             (selected != "Favorites" || library.favoriteStickers.contains($0.id)) &&
+            (tab != "GIFs" || ($0.asset.map(PrivateImage.isAnimated) ?? false)) &&
             (pack == "All packs" || pack == $0.pack) &&
             (search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) || $0.tags.localizedCaseInsensitiveContains(search))
         }
@@ -884,12 +919,13 @@ struct StickerDrawer: View {
             TextField("Search locally", text: $search).flField()
             Picker("Content type", selection: $tab) {
                 Text("Stickers").tag("Stickers")
+                Text("GIFs").tag("GIFs")
                 Text("Emoji").tag("Emoji")
             }.pickerStyle(.segmented)
             Picker("Emoji collection", selection: $selected) {
                 ForEach(["All", "Recent", "Favorites"], id: \.self) { Text($0) }
             }.pickerStyle(.segmented)
-            if tab == "Stickers" {
+            if tab != "Emoji" {
                 Button("Import sticker pack") {
                     importGeneration = vault.chatGeneration
                     importing = true
@@ -910,17 +946,22 @@ struct StickerDrawer: View {
                 }
             }
             ScrollView {
-                if tab == "Stickers" {
+                if tab != "Emoji" {
+                    if stickers.isEmpty {
+                        Text(tab == "GIFs" ? "Import a version 3 GIF pack to add local animations. Searches stay on this iPhone." : "No matching stickers")
+                            .font(.footnote).foregroundStyle(Palette.muted)
+                    }
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 12) {
                         ForEach(stickers) { sticker in
                             VStack {
                                 Button {
                                     sendSticker(sticker)
+                                    if vault.preferences.haptics { UISelectionFeedbackGenerator().selectionChanged() }
                                     library.recentStickers.removeAll { $0 == sticker.id }
                                     library.recentStickers.insert(sticker.id, at: 0)
                                 } label: {
-                                    if let bytes = try? sticker.imageData(), let image = UIImage(data: bytes) {
-                                        Image(uiImage: image).resizable().scaledToFit().frame(height: 80)
+                                    if let bytes = try? sticker.imageData() {
+                                        PrivateMediaImage(data: bytes).frame(width: 80, height: 80)
                                     }
                                 }.disabled(messaging.working).accessibilityLabel("Send \(sticker.title) sticker")
                                 Button {
@@ -990,7 +1031,7 @@ struct StickerDrawer: View {
                     library = updated
                     importStatus = "Imported \(imported.name). \(imported.author) · \(imported.license)"
                 } catch let error as CocoaError where error.code == .userCancelled { }
-                catch { importStatus = "Can't import this pack. Use a valid version 2 pack with bounded still images." }
+                catch { importStatus = "Can't import this pack. Use a bounded version 2 or 3 pack." }
                 }
             }
             .onDisappear {
@@ -1016,6 +1057,7 @@ private struct PeopleView: View {
                 if !invitation.isEmpty {
                     Text("Invitation code").font(.headline)
                     Text(invitation).font(.body.monospaced()).textSelection(.disabled)
+                    PairingQRCode(value: invitation, kind: .invitation)
                     Text("Give this code to your friend privately. It expires and needs approval.")
                         .font(.footnote).foregroundStyle(Palette.muted)
                 }
@@ -1076,6 +1118,8 @@ private struct YouView: View {
     @EnvironmentObject var vault: LocalVault
     @State private var showPassword = false
     @State private var showPrivacy = false
+    @State private var showNotifications = false
+    @State private var showProfile = false
     @State private var showDevices = false
     @State private var showEnrollment = false
     @State private var showBootstrap = false
@@ -1084,11 +1128,16 @@ private struct YouView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 Text("You").font(.largeTitle.bold())
-                Text("Testing build · Messages and calls arrive while the chat is open and unlocked. Background notifications are not available yet.")
+                Text("Messages decrypt only in unlocked chats. Calls require both participants to keep the chat open.")
                     .font(.footnote).foregroundStyle(Palette.muted)
                 HStack(spacing: 14) {
-                    Text(String(vault.profileName.prefix(1))).font(.title)
-                        .frame(width: 58, height: 58).background(Palette.surface, in: Circle())
+                    if let bytes = vault.profileAvatar, let image = UIImage(data: bytes) {
+                        Image(uiImage: image).resizable().scaledToFill().frame(width: 58, height: 58).clipShape(Circle())
+                            .accessibilityLabel("Your local avatar")
+                    } else {
+                        Text(String(vault.profileName.prefix(1))).font(.title)
+                            .frame(width: 58, height: 58).background(Palette.surface, in: Circle())
+                    }
                     VStack(alignment: .leading) {
                         Text(vault.profileName).font(.headline)
                         Text(vault.username.isEmpty ? "Not enrolled" : "@\(vault.username)")
@@ -1096,9 +1145,11 @@ private struct YouView: View {
                     }
                 }
                 VStack(spacing: 0) {
+                    row("Profile and appearance", "person.crop.circle") { showProfile = true }
                     row("Change app password", "key") { showPassword = true }
                     row("Authorized devices", "iphone") { showDevices = true }
                     row("Privacy protections", "hand.raised") { showPrivacy = true }
+                    row("Notifications", "bell") { showNotifications = true }
                     if vault.deviceID.isEmpty {
                         row("Use invitation", "envelope") { showEnrollment = true }
                         row("First device setup", "iphone.gen3") { showBootstrap = true }
@@ -1110,6 +1161,8 @@ private struct YouView: View {
         .background(Palette.background).foregroundStyle(Palette.text)
         .sheet(isPresented: $showPassword) { ChangePasswordView() }
         .sheet(isPresented: $showPrivacy) { PrivacyView() }
+        .sheet(isPresented: $showNotifications) { NotificationsView() }
+        .sheet(isPresented: $showProfile) { ProfilePreferencesView() }
         .sheet(isPresented: $showDevices) { DevicesView() }
         .sheet(isPresented: $showEnrollment) { EnrollmentView() }
         .sheet(isPresented: $showBootstrap) { BootstrapView() }
@@ -1158,6 +1211,7 @@ private struct EnrollmentView: View {
     @EnvironmentObject var vault: LocalVault
     @Environment(\.dismiss) var dismiss
     @State private var code = ""
+    @State private var scanInvitation = false
     @State private var name = ""
     @State private var username = ""
     @State private var status = ""
@@ -1165,6 +1219,8 @@ private struct EnrollmentView: View {
         NavigationStack {
             VStack(spacing: 14) {
                 TextField("Invitation code", text: $code).flField()
+                Button("Scan invitation") { scanInvitation = true }
+                    .sheet(isPresented: $scanInvitation) { PairingScanner(expected: .invitation) { code = $0 } }
                 TextField("Name", text: $name).flField()
                 TextField("Username", text: $username).flField()
                 if !status.isEmpty { Text(status).foregroundStyle(Palette.muted) }
@@ -1230,6 +1286,7 @@ private struct PairExistingDeviceView: View {
     @Environment(\.dismiss) var dismiss
     @State private var publicKey = ""
     @State private var deviceID = ""
+    @State private var scanDeviceID = false
     @State private var status = ""
 
     var body: some View {
@@ -1238,10 +1295,13 @@ private struct PairExistingDeviceView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("On your existing iPhone, open You → Authorized devices → Add device. Transfer this public pairing key through a trusted channel and compare it on both phones.")
                     Text(publicKey).font(.body.monospaced()).textSelection(.enabled)
+                    PairingQRCode(value: publicKey, kind: .publicKey)
                     Text("Public pairing key. Your private key stays on this iPhone.")
                         .font(.footnote).foregroundStyle(Palette.muted)
                     TextField("Device ID from your existing iPhone", text: $deviceID)
                         .textInputAutocapitalization(.never).flField()
+                    Button("Scan device ID") { scanDeviceID = true }
+                        .sheet(isPresented: $scanDeviceID) { PairingScanner(expected: .deviceID) { deviceID = $0 } }
                     Text("Approve the device on your existing iPhone before continuing. Old messages are not transferred.")
                         .font(.footnote)
                     if !status.isEmpty { Text(status).foregroundStyle(Palette.muted) }
@@ -1275,6 +1335,7 @@ private struct ApproveNewDeviceView: View {
     @State private var pendingID = ""
     @State private var status = ""
     @State private var busy = false
+    @State private var scanPublicKey = false
 
     var body: some View {
         NavigationStack {
@@ -1283,9 +1344,12 @@ private struct ApproveNewDeviceView: View {
                     Text("Enter the public pairing key displayed by your new iPhone. Check the complete key on both screens before approving.")
                     TextField("Public pairing key", text: $publicKey)
                         .textInputAutocapitalization(.never).flField().disabled(!pendingID.isEmpty)
+                    Button("Scan public pairing key") { scanPublicKey = true }.disabled(!pendingID.isEmpty)
+                        .sheet(isPresented: $scanPublicKey) { PairingScanner(expected: .publicKey) { publicKey = $0 } }
                     if !pendingID.isEmpty {
                         Text("Device ID").font(.headline)
                         Text(pendingID).font(.body.monospaced()).textSelection(.enabled)
+                        PairingQRCode(value: pendingID, kind: .deviceID)
                         Text("Enter this ID on the new iPhone. This approval expires after ten minutes. No message history or chat keys will be transferred.")
                             .font(.footnote)
                         PrimaryButton(title: "I compared the key — approve device") {

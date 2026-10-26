@@ -1,1 +1,3 @@
 cryptography==50.0.2
+httpx[http2]==0.28.1
+PyJWT==2.15.1

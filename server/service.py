@@ -9,6 +9,9 @@ import os
 import secrets
 import sqlite3
 import time
+import threading
+import re
+import push
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -124,6 +127,11 @@ def connect(path: str = DB_PATH) -> sqlite3.Connection:
       room_id TEXT PRIMARY KEY REFERENCES rooms(id), group_id TEXT NOT NULL REFERENCES private_groups(room_id),
       left_device TEXT NOT NULL, right_device TEXT NOT NULL,
       UNIQUE(group_id,left_device,right_device));
+    CREATE TABLE IF NOT EXISTS push_tokens(
+      device_id TEXT PRIMARY KEY REFERENCES devices(id), token BLOB NOT NULL);
+    CREATE TABLE IF NOT EXISTS push_queue(
+      device_id TEXT PRIMARY KEY REFERENCES devices(id), generation INTEGER NOT NULL,
+      next_attempt INTEGER NOT NULL, attempts INTEGER NOT NULL, expires_at INTEGER NOT NULL);
     """)
     db.commit()
     return db
@@ -145,6 +153,37 @@ def active_session(db: sqlite3.Connection, token: str) -> sqlite3.Row:
         AND s.revoked_at IS NULL AND d.state='active'""", (digest(token), int(time.time()))).fetchone()
     require(row is not None, 401, "Authentication required")
     return row
+
+
+def register_push(db: sqlite3.Connection, actor: sqlite3.Row, token: str) -> dict:
+    require(push.Configuration.load() is not None, 503, "Notifications unavailable")
+    require(isinstance(token, str) and re.fullmatch(r"[0-9a-f]{64,200}", token) is not None)
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        require(db.execute("SELECT 1 FROM devices WHERE id=? AND state='active'",
+                           (actor["device_id"],)).fetchone() is not None, 401, "Authentication required")
+        db.execute("INSERT OR REPLACE INTO push_tokens VALUES(?,?)",
+                   (actor["device_id"], protect(token, "push-token:" + actor["device_id"])))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {"state": "registered"}
+
+
+def update_profile(db: sqlite3.Connection, actor: sqlite3.Row, name: str, username: str) -> dict:
+    require(isinstance(name, str) and 1 <= len(name.strip()) <= 80 and all(ord(c) >= 32 for c in name))
+    require(isinstance(username, str) and re.fullmatch(r"[A-Za-z0-9_]{3,32}", username) is not None)
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        require(db.execute("SELECT 1 FROM devices WHERE id=? AND state='active'",
+                           (actor["device_id"],)).fetchone() is not None, 401, "Authentication required")
+        db.execute("UPDATE users SET name=?,username=?,username_hash=? WHERE id=?",
+                   (protect(name.strip(), "name"), protect(username, "username"), username_hash(username), actor["user_id"]))
+        db.commit()
+    except Exception:
+        db.rollback(); raise
+    return {"user_id": actor["user_id"], "device_id": actor["device_id"], "name": name.strip(), "username": username}
 
 
 def issue_session(db: sqlite3.Connection, device_id: str) -> str:
@@ -253,6 +292,8 @@ def revoke_device(db: sqlite3.Connection, actor: sqlite3.Row, device_id: str) ->
         db.execute("UPDATE invitations SET used_at=? WHERE created_by=? AND used_at IS NULL",
                    (int(time.time()), device_id))
         db.execute("DELETE FROM envelopes WHERE recipient_device=? AND delivered_at IS NULL", (device_id,))
+        db.execute("DELETE FROM push_tokens WHERE device_id=?", (device_id,))
+        db.execute("DELETE FROM push_queue WHERE device_id=?", (device_id,))
         db.execute("DELETE FROM prekey_bundles WHERE device_id=?", (device_id,))
         db.execute("DELETE FROM prekey_claims WHERE target_device=? OR requester_device=?", (device_id, device_id))
         for group in db.execute("SELECT room_id,roster FROM private_groups").fetchall():
@@ -428,6 +469,9 @@ def send_envelope(db: sqlite3.Connection, actor: sqlite3.Row, room_id: str, reci
             return envelope_id
         db.execute("INSERT INTO envelopes VALUES(?,?,?,?,?,?,?,NULL)",
                    (envelope_id, room_id, actor["device_id"], recipient, kind, ciphertext, int(time.time())))
+        db.execute("""INSERT INTO push_queue VALUES(?,1,0,0,?) ON CONFLICT(device_id)
+            DO UPDATE SET generation=generation+1,next_attempt=0,attempts=0,expires_at=excluded.expires_at""",
+            (recipient, int(time.time()) + 300))
         db.commit()
     except Exception:
         db.rollback()
@@ -675,7 +719,11 @@ class Handler(BaseHTTPRequestHandler):
                     pass
                 else:
                     capabilities.append("encrypted_calls_v1")
+                if push.Configuration.load() is not None:
+                    capabilities.append("generic_push_v1")
                 return {"capabilities": capabilities}
+            if self.command == "POST" and path == "/v1/notifications/register":
+                return register_push(db, actor, data["token"])
             if self.command == "GET" and path == "/v1/calls/turn":
                 return turn_configuration()
             if self.command == "POST" and path == "/v1/groups":
@@ -691,6 +739,8 @@ class Handler(BaseHTTPRequestHandler):
                 row = db.execute("SELECT name,username FROM users WHERE id=?", (actor["user_id"],)).fetchone()
                 return {"user_id": actor["user_id"], "device_id": actor["device_id"],
                         "name": reveal(row["name"], "name"), "username": reveal(row["username"], "username")}
+            if self.command == "POST" and path == "/v1/me":
+                return update_profile(db, actor, data["name"], data["username"])
             if self.command == "POST" and path == "/v1/invitations":
                 return {"code": create_invitation(db, actor["device_id"], int(data.get("ttl", 86400)))}
             if self.command == "GET" and path == "/v1/admissions":
@@ -769,4 +819,5 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     connect().close()
+    threading.Thread(target=push.run, args=(connect, reveal), daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("FL_PORT", "8787"))), Handler).serve_forever()

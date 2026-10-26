@@ -2,6 +2,19 @@ import SwiftUI
 import UIKit
 
 final class KeyboardPolicyDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        PrivateNotifications.shared.resumeRegistration()
+        return true
+    }
+
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken token: Data) {
+        PrivateNotifications.shared.received(token)
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        PrivateNotifications.shared.registrationFailed()
+    }
+
     func application(_ application: UIApplication,
                      shouldAllowExtensionPointIdentifier identifier: UIApplication.ExtensionPointIdentifier) -> Bool {
         identifier != .keyboard

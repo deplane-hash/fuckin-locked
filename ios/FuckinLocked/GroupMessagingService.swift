@@ -184,6 +184,10 @@ enum GroupMessagingError: Error { case closed, verificationRequired }
         try await send(MessageContent(id: UUID(), text: "", image: bytes, groupID: try room()))
     }
 
+    func sendFile(_ file: PrivateAttachment) async throws {
+        try await send(MessageContent(id: UUID(), text: "", groupID: try room(), file: file))
+    }
+
     func react(_ value: String, to target: UUID) async throws {
         guard messages.contains(where: { $0.message.id == target }) else { throw MessagingError.invalidMessage }
         try await send(MessageContent(id: UUID(), text: "", reactionTarget: target, reaction: value, groupID: try room()))
@@ -239,7 +243,7 @@ enum GroupMessagingError: Error { case closed, verificationRequired }
                 byID[key] = GroupDisplayedMessage(senderDevice: vault.deviceID,
                     message: StoredMessage(id: content.id, body: content.text, sentAt: Date(),
                         isOutgoing: true, delivery: .sending, envelopeID: nil, ciphertext: nil,
-                        image: content.image, groupID: content.groupID, senderDeviceID: vault.deviceID))
+                        image: content.image, groupID: content.groupID, senderDeviceID: vault.deviceID, file: content.file))
             } else { byID[key]?.message.delivery = .sending }
         }
         // Start from a clean aggregate: child one-to-one records can contain

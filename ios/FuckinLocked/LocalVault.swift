@@ -82,6 +82,7 @@ struct StoredMessage: Codable, Identifiable, Equatable {
     var groupID: String? = nil
     var senderDeviceID: String? = nil
     var callSignal: CallSignal? = nil
+    var file: PrivateAttachment? = nil
 }
 
 struct ChatPayload: Codable {
@@ -152,6 +153,8 @@ struct StoredIndex: Codable {
     var username: String = ""
     var deviceID: String = ""
     var userID: String = ""
+    var profileAvatar: Data? = nil
+    var preferences: AppPreferences? = nil
 }
 
 struct VaultHeader: Codable {
@@ -184,6 +187,8 @@ struct DelayLedger: Codable {
     @Published private(set) var profileName = "You"
     @Published private(set) var username = ""
     @Published private(set) var deviceID = ""
+    @Published private(set) var profileAvatar: Data?
+    @Published private(set) var preferences = AppPreferences()
     @Published private(set) var unlockedChatID: UUID?
     @Published private(set) var messages: [String] = []
     @Published private(set) var messageRecords: [StoredMessage] = []
@@ -366,6 +371,8 @@ struct DelayLedger: Codable {
             profileName = decoded.profileName
             username = decoded.username
             deviceID = decoded.deviceID
+            profileAvatar = decoded.profileAvatar
+            preferences = decoded.preferences ?? AppPreferences()
             isUnlocked = true
         } catch {
             try failedAppAttempt()
@@ -443,6 +450,23 @@ struct DelayLedger: Codable {
         self.profileName = name
         self.username = username
         self.deviceID = deviceID
+    }
+
+    func setAvatar(_ data: Data?) throws {
+        guard isUnlocked else { throw VaultError.corrupt }
+        let cleaned = try data.map { try PrivateImage.importImage($0) }
+        var candidate = index
+        candidate.profileAvatar = cleaned
+        try save(candidate)
+        profileAvatar = cleaned
+    }
+
+    func setPreferences(_ value: AppPreferences) throws {
+        guard isUnlocked else { throw VaultError.corrupt }
+        var candidate = index
+        candidate.preferences = value
+        try save(candidate)
+        preferences = value
     }
 
     func unlockChat(_ id: UUID, password: String) throws {
@@ -677,6 +701,8 @@ struct DelayLedger: Codable {
         index = StoredIndex()
         chats.removeAll(keepingCapacity: false)
         profileName = "You"
+        profileAvatar = nil
+        preferences = AppPreferences()
         username = ""
         deviceID = ""
         appKey = nil

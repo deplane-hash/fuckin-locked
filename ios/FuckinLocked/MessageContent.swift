@@ -13,13 +13,14 @@ struct MessageContent: Codable {
     var reaction: String?
     var groupID: String? = nil
     var callSignal: CallSignal? = nil
+    var file: PrivateAttachment? = nil
 
     static let reactions = ["💚", "👍", "😂", "😮", "😢", "🔥"]
 
     func validate() throws {
         guard version == 1, text.utf8.count <= 16_384 else { throw MessagingError.invalidMessage }
         if let callSignal {
-            guard text.isEmpty, image == nil, reactionTarget == nil, reaction == nil,
+            guard text.isEmpty, image == nil, file == nil, reactionTarget == nil, reaction == nil,
                   groupID == nil else {
                 throw MessagingError.invalidMessage
             }
@@ -34,12 +35,14 @@ struct MessageContent: Codable {
             else { throw MessagingError.invalidMessage }
         }
         if let reactionTarget {
-            guard reactionTarget != id, image == nil, text.isEmpty,
+            guard reactionTarget != id, image == nil, file == nil, text.isEmpty,
                   let reaction, Self.reactions.contains(reaction) else { throw MessagingError.invalidMessage }
         } else {
-            guard reaction == nil, !text.isEmpty || image != nil else { throw MessagingError.invalidMessage }
+            guard reaction == nil, !text.isEmpty || image != nil || file != nil,
+                  image == nil || file == nil else { throw MessagingError.invalidMessage }
         }
         if let image { try PrivateImage.validate(image) }
+        if let file { try file.validate() }
     }
 }
 
@@ -79,6 +82,8 @@ enum PrivateImage {
     static let maxBytes = 256_000
 
     static func validate(_ bytes: Data) throws {
+        guard bytes.count <= maxBytes else { throw MessagingError.invalidMessage }
+        if isAnimated(bytes) { try validateAnimation(bytes); return }
         guard bytes.count <= maxBytes,
               let source = CGImageSourceCreateWithData(bytes as CFData, nil),
               CGImageSourceGetCount(source) == 1,

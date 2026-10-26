@@ -69,7 +69,13 @@ import ImageIO
         CGImageDestinationAddImage(gif, image, nil)
         CGImageDestinationAddImage(gif, image, nil)
         XCTAssertTrue(CGImageDestinationFinalize(gif))
-        XCTAssertThrowsError(try PrivateImage.validate(animated as Data))
+        XCTAssertNoThrow(try PrivateImage.validate(animated as Data))
+        let animatedAsset = StickerPack.Asset(id: "gif", name: "GIF", tags: [], image: animated as Data)
+        let legacy = StickerPack(schema: 2, id: "legacy", name: "Pack", author: "Artist", license: "CC0", stickers: [animatedAsset])
+        XCTAssertThrowsError(try legacy.validate())
+        let current = StickerPack(schema: 3, id: "animated", name: "Pack", author: "Artist", license: "CC0", stickers: [animatedAsset])
+        let preserved = try StickerPack.decode(JSONEncoder().encode(current))
+        XCTAssertTrue(PrivateImage.isAnimated(preserved.stickers[0].image))
     }
 
     func testImportedArtworkAndAttributionStayChatEncryptedAcrossRestart() throws {

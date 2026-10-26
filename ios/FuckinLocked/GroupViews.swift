@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct GroupComposeView: View {
     @EnvironmentObject var vault: LocalVault
@@ -115,6 +116,9 @@ struct GroupConversationView: View {
     @State private var changePassword = false
     @State private var photo: PhotosPickerItem?
     @State private var viewedImage: Data?
+    @State private var viewedFile: PrivateAttachment?
+    @State private var filePicker = false
+    @State private var fileGeneration: UInt64 = 0
     @State private var removal: GroupMember?
 
     init(id: UUID, title: String, vault: LocalVault, gateway: Gateway) {
@@ -150,7 +154,7 @@ struct GroupConversationView: View {
                     ForEach(group.messages) { item in
                         GroupBubble(item: item, sender: group.members.first(where: { $0.id == item.senderDevice })?.name ?? "Member",
                             ready: group.ready && !group.working,
-                            viewImage: { viewedImage = $0 }, react: { reaction in
+                            viewImage: { viewedImage = $0 }, viewFile: { viewedFile = $0 }, react: { reaction in
                                 Task {
                                     do { try await group.react(reaction, to: item.message.id) }
                                     catch { status = "Reaction saved for retry or unavailable" }
@@ -183,7 +187,11 @@ struct GroupConversationView: View {
                 PhotosPicker(selection: $photo, matching: .images, preferredItemEncoding: .current) {
                     Image(systemName: "paperclip").frame(minWidth: 44, minHeight: 44)
                 }.disabled(!group.ready || group.working).accessibilityLabel("Attach image")
-            }.padding(12).background(Palette.surface, in: Capsule()).padding(.horizontal)
+                Button {
+                    fileGeneration = vault.chatGeneration; filePicker = true
+                } label: { Image(systemName: "doc.badge.plus").frame(minWidth: 44, minHeight: 44) }
+                    .disabled(!group.ready || group.working).accessibilityLabel("Attach PDF or text file")
+            }.padding(12).background(Palette.surface, in: RoundedRectangle(cornerRadius: 24)).padding(.horizontal)
             if drawer {
                 StickerDrawer(id: id, insert: { draft += $0 }, sendSticker: { sticker in
                     Task {
@@ -201,16 +209,30 @@ struct GroupConversationView: View {
             }
         }.foregroundStyle(Palette.text).background(Palette.background).tint(Palette.lime)
             .overlay {
-                if let viewedImage, let image = UIImage(data: viewedImage) {
+                if let viewedImage {
                     VStack {
                         Button("Close image") { self.viewedImage = nil }.padding()
                         Spacer()
-                        Image(uiImage: image).resizable().scaledToFit().accessibilityLabel("Group message image")
+                        PrivateMediaImage(data: viewedImage).accessibilityLabel("Group message image")
                         Spacer()
                     }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Palette.background)
                 }
             }
             .sheet(isPresented: $changePassword) { ChangeChatPasswordView(id: id) }
+            .sheet(item: $viewedFile) { file in PrivateAttachmentView(attachment: file) { viewedFile = nil } }
+            .sheet(isPresented: $filePicker) {
+                StickerPackPicker(allowedTypes: [.pdf, .plainText]) { result in
+                    filePicker = false
+                    guard vault.unlockedChatID == id, vault.chatGeneration == fileGeneration else { return }
+                    do {
+                        let file = try PrivateAttachment.read(result.get())
+                        Task {
+                            do { try await group.sendFile(file) }
+                            catch { status = "File saved for retry or unavailable" }
+                        }
+                    } catch { status = "Choose a TXT or PDF file up to 512 KB and 20 PDF pages." }
+                }
+            }
             .confirmationDialog("Removing this member closes the group to new messages. Cached history remains locked by its password.",
                 isPresented: Binding(get: { removal != nil }, set: { if !$0 { removal = nil } })) {
                 if let removal {
@@ -230,7 +252,7 @@ struct GroupConversationView: View {
                     do {
                         guard let bytes = try await item.loadTransferable(type: Data.self),
                               vault.chatGeneration == generation else { return }
-                        try await group.sendImage(PrivateImage.importImage(bytes))
+                        try await group.sendImage(PrivateImage.importMedia(bytes))
                     } catch { status = "Image saved for retry or unavailable" }
                 }
             }
@@ -243,7 +265,7 @@ struct GroupConversationView: View {
                 }
             }
             .onDisappear {
-                draft = ""; viewedImage = nil; photo = nil; drawer = false
+                draft = ""; viewedImage = nil; viewedFile = nil; photo = nil; drawer = false
                 group.close(); vault.lockChat()
             }
     }
@@ -254,16 +276,21 @@ private struct GroupBubble: View {
     let sender: String
     let ready: Bool
     let viewImage: (Data) -> Void
+    let viewFile: (PrivateAttachment) -> Void
     let react: (String) -> Void
     var body: some View {
         HStack {
             if item.message.isOutgoing { Spacer(minLength: 36) }
             VStack(alignment: .leading, spacing: 5) {
                 if !item.message.isOutgoing { Text(sender).font(.caption).foregroundStyle(Palette.muted) }
-                if let bytes = item.message.image, let image = UIImage(data: bytes) {
+                if let bytes = item.message.image {
                     Button { viewImage(bytes) } label: {
-                        Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: 220, maxHeight: 220)
+                        PrivateMediaImage(data: bytes).frame(width: 220, height: 220)
                     }.accessibilityLabel("View image")
+                }
+                if let file = item.message.file {
+                    Button { viewFile(file) } label: { Label(file.name, systemImage: "doc").padding(10) }
+                        .accessibilityLabel("Open attachment \(file.name)")
                 }
                 if !item.message.body.isEmpty {
                     Text(item.message.body).padding(12)

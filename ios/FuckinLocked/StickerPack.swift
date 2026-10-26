@@ -28,6 +28,10 @@ struct StickerPack: Codable, Equatable, Identifiable {
         let pack = try JSONDecoder().decode(Self.self, from: data)
         try pack.validate()
         let sanitized = try pack.stickers.map { asset -> Asset in
+            if PrivateImage.isAnimated(asset.image) {
+                return Asset(id: asset.id, name: asset.name, tags: asset.tags,
+                             image: try PrivateImage.sanitizedGIF(asset.image))
+            }
             let output = NSMutableData()
             guard let source = CGImageSourceCreateWithData(asset.image as CFData, nil),
                   let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
@@ -46,7 +50,7 @@ struct StickerPack: Codable, Equatable, Identifiable {
     }
 
     func validate() throws {
-        guard schema == 2, Self.validID(id), Self.validText(name, limit: 80),
+        guard [2, 3].contains(schema), Self.validID(id), Self.validText(name, limit: 80),
               Self.validText(author, limit: 120), Self.validText(license, limit: 1000),
               (1...32).contains(stickers.count),
               Set(stickers.map(\.id)).count == stickers.count,
@@ -59,12 +63,12 @@ struct StickerPack: Codable, Equatable, Identifiable {
                   asset.tags.allSatisfy({ Self.validText($0, limit: 40) }) else {
                 throw MessagingError.invalidMessage
             }
-            // Animation is explicitly rejected by the current bounded raster
-            // validator; no silent flattening or third-party GIF integration.
+            if schema == 2 && PrivateImage.isAnimated(asset.image) { throw MessagingError.invalidMessage }
             try PrivateImage.validate(asset.image)
             guard let source = CGImageSourceCreateWithData(asset.image as CFData, nil),
                   let type = CGImageSourceGetType(source),
-                  ["public.png", "public.jpeg"].contains(type as String),
+                  ["public.png", "public.jpeg", "com.compuserve.gif"].contains(type as String),
+                  schema == 3 || type as String != "com.compuserve.gif",
                   let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
                   let width = properties[kCGImagePropertyPixelWidth] as? Int,
                   let height = properties[kCGImagePropertyPixelHeight] as? Int,
@@ -126,11 +130,16 @@ struct StickerPack: Codable, Equatable, Identifiable {
 // Explicit open-in-place policy: never ask iOS to import a plaintext copy into
 // the app's Documents/Inbox. Cloud providers still control their own caches.
 struct StickerPackPicker: UIViewControllerRepresentable {
+    let allowedTypes: [UTType]
     let completion: (Result<URL, Error>) -> Void
+
+    init(allowedTypes: [UTType] = [.json], completion: @escaping (Result<URL, Error>) -> Void) {
+        self.allowedTypes = allowedTypes; self.completion = completion
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(completion: completion) }
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.json], asCopy: false)
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: allowedTypes, asCopy: false)
         picker.allowsMultipleSelection = false
         picker.delegate = context.coordinator
         return picker

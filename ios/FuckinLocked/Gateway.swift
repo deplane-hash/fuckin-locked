@@ -246,8 +246,20 @@ struct RelayPrekeyBundle: Codable {
         }
     }
 
+    func registerNotifications(_ token: String) async throws {
+        let capabilities: [String: [String]] = try await request("/v1/capabilities")
+        guard capabilities["capabilities"]?.contains("generic_push_v1") == true else {
+            throw ConnectionError.unavailable
+        }
+        let _: [String: String] = try await request("/v1/notifications/register", method: "POST", body: ["token": token])
+    }
+
     func accountProfile() async throws -> AccountProfile {
         try await request("/v1/me")
+    }
+
+    func updateProfile(name: String, username: String) async throws -> AccountProfile {
+        try await request("/v1/me", method: "POST", body: ["name": name, "username": username])
     }
 
     func requestDevice(publicKey: String) async throws -> String {

@@ -159,6 +159,10 @@ enum MessagingError: Error {
         try await sendContent(MessageContent(id: UUID(), text: "", image: image), in: id)
     }
 
+    func sendFile(_ file: PrivateAttachment, in id: UUID) async throws {
+        try await sendContent(MessageContent(id: UUID(), text: "", file: file), in: id)
+    }
+
     func sendCallSignal(_ signal: CallSignal, in id: UUID) async throws {
         try signal.validate()
         let generation = vault.chatGeneration
@@ -243,7 +247,7 @@ enum MessagingError: Error {
                                     delivery: .sending, envelopeID: nil, ciphertext: wire,
                                     image: content.image, reactionTarget: content.reactionTarget,
                                     reaction: content.reaction, groupID: content.groupID,
-                                    senderDeviceID: vault.deviceID, callSignal: content.callSignal)
+                                    senderDeviceID: vault.deviceID, callSignal: content.callSignal, file: content.file)
         state = store.state
         try vault.commitChat(state: state, message: persistMessage ? message : nil, for: id)
         // Persist the exact wire bytes together with the advanced ratchet before
@@ -336,7 +340,7 @@ enum MessagingError: Error {
                                         envelopeID: envelope.id, ciphertext: nil,
                                         image: content.image, reactionTarget: content.reactionTarget,
                                         reaction: content.reaction, groupID: content.groupID,
-                                        senderDeviceID: envelope.sender_device, callSignal: content.callSignal)
+                                        senderDeviceID: envelope.sender_device, callSignal: content.callSignal, file: content.file)
             state = store.state
             try vault.commitReceived(state: state, message: message,
                                      envelopeID: envelope.id, for: id)

@@ -23,7 +23,7 @@ settings:
     SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited)"
     GCC_PREPROCESSOR_DEFINITIONS: "$(inherited)"
     INFOPLIST_KEY_UIRequiresFullScreen: YES
-    MARKETING_VERSION: "0.3.0"
+    MARKETING_VERSION: "0.4.0"
     CURRENT_PROJECT_VERSION: "1"
     INFOPLIST_KEY_CFBundleShortVersionString: "$(MARKETING_VERSION)"
     INFOPLIST_KEY_CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
@@ -57,6 +57,7 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: "Fuckin Locked"
         INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: NO
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Microphone access is required for encrypted voice calls."
+        INFOPLIST_KEY_NSCameraUsageDescription: "Scan invitation and device pairing QR codes."
   FuckinLockedTests:
     type: bundle.unit-test
     platform: iOS
