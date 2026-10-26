@@ -78,6 +78,9 @@ final class LockLifecycleTests: XCTestCase {
         openLockedChat(friend, in: app)
         let chatField = app.secureTextFields["Chat password"]
         XCTAssertTrue(chatField.waitForExistence(timeout: 5), "Opening a chat must require its password")
+        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: chatField)
+        XCTAssertEqual(XCTWaiter.wait(for: [hittable], timeout: 10), .completed,
+                       "Chat password field must remain tappable above the keyboard")
         chatField.tap(); chatField.typeText(chatPassword)
         app.buttons["Unlock chat"].tap()
         declinePasswordStorageIfPresented(app)
