@@ -173,6 +173,12 @@ private final class OfflineTransport: URLProtocol {
         try await aliceMessaging.sendImage(jpeg, in: aliceChatID)
         try await bobMessaging.receive(in: bobChatID)
         XCTAssertEqual(bobVault.messageRecords.last?.image, jpeg)
+        stage = "encrypted animated sticker"
+        let gif = try XCTUnwrap(StarterStickers.items.first(where: \.isAnimated)).imageData()
+        try await aliceMessaging.sendImage(gif, in: aliceChatID)
+        try await bobMessaging.receive(in: bobChatID)
+        XCTAssertEqual(bobVault.messageRecords.last?.image, gif)
+        XCTAssertTrue(PrivateImage.isAnimated(try XCTUnwrap(bobVault.messageRecords.last?.image)))
         stage = "encrypted text attachment"
         let file = PrivateAttachment(name: "private-note.txt", format: .text, data: Data("private file contents".utf8))
         try await aliceMessaging.sendFile(file, in: aliceChatID)
@@ -181,6 +187,7 @@ private final class OfflineTransport: URLProtocol {
         bobVault.lockApp()
         let saved = try Data(contentsOf: root.appendingPathComponent("bob/vault.bin"))
         XCTAssertNil(saved.range(of: jpeg))
+        XCTAssertNil(saved.range(of: gif))
         XCTAssertNil(saved.range(of: file.data))
         XCTAssertFalse(String(decoding: saved, as: UTF8.self).contains("hello from alice"))
         stage = "offline outbox recovery"

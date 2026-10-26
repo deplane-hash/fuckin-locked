@@ -89,6 +89,8 @@ import CoreImage.CIFilterBuiltins
     }
 
     func testGIFFrameOrderTimingAndSizeBoundsSurviveSanitization() throws {
+        let starter = try XCTUnwrap(StarterStickers.items.first(where: \.isAnimated))
+        XCTAssertTrue(PrivateImage.isAnimated(try starter.imageData()))
         let bytes = NSMutableData()
         let encoder = try XCTUnwrap(CGImageDestinationCreateWithData(bytes, "com.compuserve.gif" as CFString, 2, nil))
         for (index, color) in [UIColor.red, UIColor.blue].enumerated() {

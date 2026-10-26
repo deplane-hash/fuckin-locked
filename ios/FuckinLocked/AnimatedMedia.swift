@@ -11,6 +11,15 @@ extension PrivateImage {
         guard data.count <= maxBytes, let source = CGImageSourceCreateWithData(data as CFData, nil),
               let type = CGImageSourceGetType(source), type as String == "com.compuserve.gif",
               (2...30).contains(CGImageSourceGetCount(source)) else { throw MessagingError.invalidMessage }
+        // GIF's logical-screen dimensions must also fit, even if individual
+        // subframes are small. Image I/O reports canvas metadata differently
+        // across OS versions, so bound the standard 10-byte GIF header too.
+        let header = Array(data.prefix(10))
+        guard header.count == 10 else { throw MessagingError.invalidMessage }
+        let canvasWidth = Int(header[6]) | (Int(header[7]) << 8)
+        let canvasHeight = Int(header[8]) | (Int(header[9]) << 8)
+        guard
+              (1...512).contains(canvasWidth), (1...512).contains(canvasHeight) else { throw MessagingError.invalidMessage }
         var pixels = 0
         for index in 0..<CGImageSourceGetCount(source) {
             guard let values = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any],

@@ -2,6 +2,7 @@ import SwiftUI
 import VisionKit
 import CoreImage.CIFilterBuiltins
 import PhotosUI
+import AVFoundation
 
 enum PairingQR {
     enum Kind: String { case invitation, publicKey, deviceID }
@@ -69,6 +70,13 @@ struct PairingScanner: View {
         NavigationStack {
             VStack(spacing: 18) {
                 Text(status).padding()
+                if AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined {
+                    Button("Allow camera scanning") {
+                        AVCaptureDevice.requestAccess(for: .video) { _ in }
+                    }
+                    Text("The app locks during the permission prompt. Unlock and reopen this scanner afterward.")
+                        .font(.footnote).padding(.horizontal)
+                }
                 if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
                     LivePairingScanner { encoded in accept(encoded) }
                 } else {

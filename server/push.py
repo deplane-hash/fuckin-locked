@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -51,8 +52,10 @@ class Sender:
     def __init__(self, config: Configuration, transport=None):
         self.config = config
         # No redirect, trust bypass, environment proxy, URL logging or fallback.
-        self.client = httpx.Client(http2=True, follow_redirects=False, timeout=5,
+        self.client = httpx.Client(http1=False, http2=True, follow_redirects=False, timeout=5,
                                    trust_env=False, transport=transport)
+        logging.getLogger("httpx").disabled = True
+        logging.getLogger("httpcore").setLevel(logging.CRITICAL)
         self.authorization = ""
         self.issued = 0
 

@@ -54,7 +54,7 @@ extension Notification.Name {
             try await gateway.registerNotifications(current)
             guard vault.isUnlocked, vault.deviceID == device, token == current else { return }
             uploadedFor = device + current
-            status = "Enabled · previews always say New message"
+            status = "Registered · previews always say New message"
         } catch { status = "Notifications need setup. Open chats to receive messages." }
     }
 

@@ -272,6 +272,7 @@ struct GroupConversationView: View {
 }
 
 private struct GroupBubble: View {
+    @EnvironmentObject private var vault: LocalVault
     let item: GroupDisplayedMessage
     let sender: String
     let ready: Bool
@@ -293,7 +294,7 @@ private struct GroupBubble: View {
                         .accessibilityLabel("Open attachment \(file.name)")
                 }
                 if !item.message.body.isEmpty {
-                    Text(item.message.body).padding(12)
+                    Text(item.message.body).font(vault.preferences.largerMessages ? .title3 : .body).padding(12)
                         .foregroundStyle(item.message.isOutgoing ? Palette.background : Palette.text)
                         .background(item.message.isOutgoing ? Palette.lime : Palette.surface,
                                     in: RoundedRectangle(cornerRadius: 16))

@@ -903,7 +903,7 @@ struct StickerDrawer: View {
         } : allStickers
         return source.filter {
             (selected != "Favorites" || library.favoriteStickers.contains($0.id)) &&
-            (tab != "GIFs" || ($0.asset.map(PrivateImage.isAnimated) ?? false)) &&
+            (tab != "GIFs" || $0.isAnimated) &&
             (pack == "All packs" || pack == $0.pack) &&
             (search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) || $0.tags.localizedCaseInsensitiveContains(search))
         }

@@ -1,4 +1,5 @@
 import UIKit
+import ImageIO
 
 struct StarterSticker: Identifiable {
     let id: String
@@ -6,9 +7,31 @@ struct StarterSticker: Identifiable {
     let pack: String
     var asset: Data? = nil
     var tags: String = ""
+    var isAnimated: Bool { id == "bounce" || (asset.map(PrivateImage.isAnimated) ?? false) }
 
     func imageData() throws -> Data {
         if let asset { try PrivateImage.validate(asset); return asset }
+        if id == "bounce" {
+            let output = NSMutableData()
+            let positions = [32, 48, 64, 80, 96, 80, 64, 48]
+            guard let encoder = CGImageDestinationCreateWithData(output, "com.compuserve.gif" as CFString, positions.count, nil) else {
+                throw MessagingError.invalidMessage
+            }
+            CGImageDestinationSetProperties(encoder, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
+            for position in positions {
+                let frame = UIGraphicsImageRenderer(size: CGSize(width: 128, height: 128), format: format).image { context in
+                    UIColor(red: 31/255, green: 34/255, blue: 33/255, alpha: 1).setFill()
+                    context.fill(CGRect(x: 0, y: 0, width: 128, height: 128))
+                    UIColor(red: 182/255, green: 246/255, blue: 83/255, alpha: 1).setFill()
+                    UIBezierPath(ovalIn: CGRect(x: CGFloat(position - 16), y: 48, width: 32, height: 32)).fill()
+                }
+                guard let raster = frame.cgImage else { throw MessagingError.invalidMessage }
+                CGImageDestinationAddImage(encoder, raster, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.12]] as CFDictionary)
+            }
+            guard CGImageDestinationFinalize(encoder) else { throw MessagingError.invalidMessage }
+            let data = output as Data; try PrivateImage.validate(data); return data
+        }
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = false
@@ -52,7 +75,8 @@ enum StarterStickers {
     static let items = [
         StarterSticker(id: "bolt", title: "Big energy", pack: "Energy"),
         StarterSticker(id: "smile", title: "Good mood", pack: "Energy"),
-        StarterSticker(id: "moon", title: "Late night", pack: "Night")
+        StarterSticker(id: "moon", title: "Late night", pack: "Night"),
+        StarterSticker(id: "bounce", title: "Little bounce", pack: "Motion")
     ]
 }
 
