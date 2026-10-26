@@ -223,14 +223,21 @@ struct GroupConversationView: View {
             .sheet(isPresented: $filePicker) {
                 StickerPackPicker(allowedTypes: [.pdf, .plainText, .wav, .mpeg4Audio, .mp3, .mpeg4Movie, .quickTimeMovie]) { result in
                     filePicker = false
-                    guard vault.unlockedChatID == id, vault.chatGeneration == fileGeneration else { return }
-                    do {
-                        let file = try PrivateAttachment.read(result.get())
-                        Task {
-                            do { try await group.sendFile(file) }
-                            catch { status = "File saved for retry or unavailable" }
+                    let generation = fileGeneration
+                    Task {
+                        do {
+                            let url = try result.get()
+                            let file = try await Task.detached(priority: .userInitiated) { try PrivateAttachment.read(url) }.value
+                            guard vault.unlockedChatID == id, vault.chatGeneration == generation else { return }
+                            try await group.sendFile(file)
+                        } catch MessagingError.queued {
+                            guard vault.chatGeneration == generation else { return }
+                            status = "Saved. Waiting for a connection."
+                        } catch {
+                            guard vault.chatGeneration == generation else { return }
+                            status = "Can't send this file. Supported files are limited to 512 KB."
                         }
-                    } catch { status = "Choose a supported file up to 512 KB: TXT, PDF, WAV, M4A, MP3, MP4 or MOV." }
+                    }
                 }
             }
             .confirmationDialog("Removing this member closes the group to new messages. Cached history remains locked by its password.",
@@ -252,7 +259,9 @@ struct GroupConversationView: View {
                     do {
                         guard let bytes = try await item.loadTransferable(type: Data.self),
                               vault.chatGeneration == generation else { return }
-                        try await group.sendImage(PrivateImage.importMedia(bytes))
+                        let media = try await Task.detached(priority: .userInitiated) { try PrivateImage.importMedia(bytes) }.value
+                        guard vault.chatGeneration == generation else { return }
+                        try await group.sendImage(media)
                     } catch { status = "Image saved for retry or unavailable" }
                 }
             }

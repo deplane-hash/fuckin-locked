@@ -5,7 +5,7 @@ import PhotosUI
 import AVFoundation
 
 enum PairingQR {
-    enum Kind: String { case invitation, publicKey, deviceID }
+    enum Kind: String, Sendable { case invitation, publicKey, deviceID }
     static func encode(_ value: String, kind: Kind) throws -> String {
         try validate(value, kind: kind)
         return "fl-pair-v1:\(kind.rawValue):\(value)"
@@ -93,7 +93,10 @@ struct PairingScanner: View {
                         do {
                             guard let data = try await item.loadTransferable(type: Data.self),
                                   vault.isUnlocked, vault.chatGeneration == generation else { return }
-                            completion(try PairingQR.readPhoto(data, expected: expected)); dismiss()
+                            let kind = expected
+                            let value = try await Task.detached(priority: .userInitiated) { try PairingQR.readPhoto(data, expected: kind) }.value
+                            guard vault.isUnlocked, vault.chatGeneration == generation else { return }
+                            completion(value); dismiss()
                         } catch { status = "This isn't a compatible pairing code" }
                     }
                 }

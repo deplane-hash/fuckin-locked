@@ -6,8 +6,8 @@ import UIKit
 
 // A single bounded JSON document avoids archive paths, symlinks, executable
 // files and URL fetching. Imported artwork is stored only in chat ciphertext.
-struct StickerPack: Codable, Equatable, Identifiable {
-    struct Asset: Codable, Equatable {
+struct StickerPack: Codable, Equatable, Identifiable, Sendable {
+    struct Asset: Codable, Equatable, Sendable {
         let id: String
         let name: String
         let tags: [String]

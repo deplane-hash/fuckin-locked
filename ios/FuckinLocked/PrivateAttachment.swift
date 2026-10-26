@@ -3,8 +3,8 @@ import PDFKit
 import UIKit
 import AVFoundation
 
-struct PrivateAttachment: Codable, Equatable, Identifiable {
-    enum Format: String, Codable { case text, pdf, audio, video }
+struct PrivateAttachment: Codable, Equatable, Identifiable, Sendable {
+    enum Format: String, Codable, Sendable { case text, pdf, audio, video }
     var id: String { name }
     let name: String
     let format: Format

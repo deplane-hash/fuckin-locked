@@ -806,14 +806,21 @@ private struct ConversationView: View {
         .sheet(isPresented: $filePicker) {
             StickerPackPicker(allowedTypes: [.pdf, .plainText, .wav, .mpeg4Audio, .mp3, .mpeg4Movie, .quickTimeMovie]) { result in
                 filePicker = false
-                guard vault.unlockedChatID == id, vault.chatGeneration == fileGeneration else { return }
-                do {
-                    let file = try PrivateAttachment.read(result.get())
-                    Task {
-                        do { try await messaging.sendFile(file, in: id) }
-                        catch { status = "File saved for retry or unavailable" }
+                let generation = fileGeneration
+                Task {
+                    do {
+                        let url = try result.get()
+                        let file = try await Task.detached(priority: .userInitiated) { try PrivateAttachment.read(url) }.value
+                        guard vault.unlockedChatID == id, vault.chatGeneration == generation else { return }
+                        try await messaging.sendFile(file, in: id)
+                    } catch MessagingError.queued {
+                        guard vault.chatGeneration == generation else { return }
+                        status = "Saved. Waiting for a connection."
+                    } catch {
+                        guard vault.chatGeneration == generation else { return }
+                        status = "Can't send this file. Supported files are limited to 512 KB."
                     }
-                } catch { status = "Choose a supported file up to 512 KB: TXT, PDF, WAV, M4A, MP3, MP4 or MOV." }
+                }
             }
         }
         .onChange(of: selectedPhoto) { _, item in
@@ -824,7 +831,8 @@ private struct ConversationView: View {
                 do {
                     guard let bytes = try await item.loadTransferable(type: Data.self),
                           vault.chatGeneration == generation else { return }
-                    let image = try PrivateImage.importMedia(bytes)
+                    let image = try await Task.detached(priority: .userInitiated) { try PrivateImage.importMedia(bytes) }.value
+                    guard vault.chatGeneration == generation else { return }
                     try await messaging.sendImage(image, in: id)
                 } catch {
                     guard vault.chatGeneration == generation else { return }
@@ -1081,17 +1089,22 @@ struct StickerDrawer: View {
             .sheet(isPresented: $importing) {
                 StickerPackPicker { result in
                 importing = false
-                guard vault.unlockedChatID == id, vault.chatGeneration == importGeneration else { return }
-                do {
-                    let imported = try StickerPack.read(result.get())
-                    var updated = library
-                    try updated.add(imported)
-                    // Commit first: a failed write must not claim the import succeeded.
-                    try vault.saveComposerLibrary(updated, for: id)
-                    library = updated
-                    importStatus = "Imported \(imported.name). \(imported.author) · \(imported.license)"
-                } catch let error as CocoaError where error.code == .userCancelled { }
-                catch { importStatus = "Can't import this pack. Use a bounded version 2 or 3 pack." }
+                let generation = importGeneration
+                Task {
+                    do {
+                        let url = try result.get()
+                        let imported = try await Task.detached(priority: .userInitiated) { try StickerPack.read(url) }.value
+                        guard vault.unlockedChatID == id, vault.chatGeneration == generation else { return }
+                        var updated = library
+                        try updated.add(imported)
+                        try vault.saveComposerLibrary(updated, for: id)
+                        library = updated
+                        importStatus = "Imported \(imported.name). \(imported.author) · \(imported.license)"
+                    } catch {
+                        guard vault.chatGeneration == generation else { return }
+                        importStatus = "Can't import this pack. Use a bounded version 2 or 3 pack."
+                    }
+                }
                 }
             }
             .onDisappear {

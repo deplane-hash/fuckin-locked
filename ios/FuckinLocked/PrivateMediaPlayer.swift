@@ -118,6 +118,7 @@ final class PrivateMediaBuffer: NSObject, AVAssetResourceLoaderDelegate, @unchec
         guard ready else { throw MessagingError.unavailable }
         if playing { audio?.pause(); player?.pause(); playing = false }
         else {
+            if position >= duration - 0.05 { seek(0) }
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .moviePlayback)
             try session.setActive(true)
@@ -130,6 +131,8 @@ final class PrivateMediaBuffer: NSObject, AVAssetResourceLoaderDelegate, @unchec
     func checkPlayback() throws {
         try check()
         guard player?.currentItem?.status != .failed else { throw MessagingError.unavailable }
+        if let audio, playing, !audio.isPlaying { playing = false }
+        if let player, playing, player.timeControlStatus == .paused, position >= duration - 0.05 { playing = false }
     }
     func seek(_ seconds: Double) {
         guard (try? check()) != nil, seconds.isFinite else { return }

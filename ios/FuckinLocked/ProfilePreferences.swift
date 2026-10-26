@@ -70,7 +70,9 @@ struct ProfilePreferencesView: View {
                         do {
                             guard let bytes = try await item.loadTransferable(type: Data.self),
                                   vault.isUnlocked, vault.chatGeneration == generation else { return }
-                            try vault.setAvatar(PrivateImage.importImage(bytes))
+                            let avatar = try await Task.detached(priority: .userInitiated) { try PrivateImage.importImage(bytes) }.value
+                            guard vault.isUnlocked, vault.chatGeneration == generation else { return }
+                            try vault.setAvatar(avatar)
                             status = "Local avatar saved"
                         } catch { status = "Couldn't import this image" }
                     }
