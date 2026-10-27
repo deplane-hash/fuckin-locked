@@ -8,7 +8,9 @@ Record the app commit/build, iPhone model and exact iOS version for each result.
    expiring invitation, and approve the second account. Reject reuse and expiry.
 2. Bind both chats to the same room and intended device. Set different app and
    chat passwords. Compare both fingerprints through a trusted external channel.
-3. Exchange text, reactions, starter stickers and still images both ways. Confirm
+3. Exchange text, reactions, animated/imported stickers, still images and small
+   TXT/PDF/audio/video attachments both ways. Playback must not auto-start; lock
+   during playback and confirm it stops. Confirm
    relay acceptance says Sent and recipient storage acknowledgement says Delivered.
    Neither state is a read receipt. Leave a phone offline and test later delivery.
 4. Queue while offline, terminate/reopen/unlock, reconnect, and confirm one message
@@ -46,8 +48,17 @@ Record the app commit/build, iPhone model and exact iOS version for each result.
 12. Disable the required gateway and attempt an invalid certificate and a redirect.
     Confirm a connection error with no alternate/direct host requests. Test TLS
     renewal for the same hostname and check only public prekeys/ciphertext reach
-    the relay. Photos/iCloud and future APNs system connections are outside this
+    the relay. Photos/iCloud and APNs system connections are outside this
     app-level routing requirement.
+13. With three approved devices, create a fixed private group, compare each peer
+    fingerprint, and exchange text/media. Revocation/removal must close the old
+    roster and prevent new keys reaching that device. Create a fresh group.
+14. Test camera/photo/manual QR pairing without automatic approval; verify local
+    avatar/preferences persist encrypted and reveal nothing while locked.
+15. After supplying legitimate APNs credentials/profile, test production device
+    tokens, generic notification delivery, ack suppression, expiry, revocation
+    and tapping a notice while locked. Inspect payloads for no identity/content.
+    Missing Apple credentials currently block this live test, not source builds.
 
 Independent review, encrypted server storage/backup verification, and signed-device
 results remain release gates. Do not describe an unfinished or untested item as

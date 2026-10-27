@@ -1,254 +1,89 @@
-# Verification report — foreground beta 0.3.0, 2026-10-25
+# Verification report — beta 0.4.0, 2026-10-27
 
-## Current verified testing build
+This is a testing beta, not a production-security certification. Historical
+results are retained in [the 0.3 report](verification-history-0.3.md).
 
-[Run 40199838055](https://github.com/deplane-hash/fuckin-locked/actions/runs/40199838055)
-completed successfully at source `9c0bb068dc623f367f68a321f226ed795d3bd737`.
-Xcode 26.6 built the iOS simulator app and unsigned Release iPhone IPA.
-Downloaded archives matched GitHub's SHA-256 digests and passed ZIP integrity
-checks. Their executable Mach-O platform IDs were checked: iOS device (2) for
-the IPA and iOS Simulator (7) for the Appetize ZIP, both arm64. Version is 0.3.0;
-the device build number is 64. Simulator execution on Appetize itself is untested.
+## Source and Xcode checks
 
-Inner-file SHA-256:
+The completed [run 40422660333](https://github.com/deplane-hash/fuckin-locked/actions/runs/40422660333)
+at `cffeb2ba0a98804f17528c0c2d0e21653000f51d` passed with Xcode 26.6:
 
-```text
-27464f2bf8fbf97b7831008c3ccf026dcd5c5284ca0cae421be567d4a9f2dfd3  FuckinLocked-0.3.0-unsigned.ipa
-9f73eb4883b156ae696fea2a7b15eeb078631da1d44634f2cadaa2178b4f9dfe  FuckinLocked-0.3.0-simulator.app.zip
-```
+- 47 core simulator tests, zero failures.
+- 1 lifecycle UI test, zero failures.
+- 33 relay tests, zero failures; repeated successfully on the live host using
+  isolated fixtures on 2026-10-27.
 
-- **38 core simulator tests passed; zero failed.** This includes real libsignal
-  two-client HTTPS fixture delivery, encrypted vault/password changes, atomic
-  write failure recovery, persistent password delays, pinned TURN route,
-  consent/lock/identity call races, unanswered-call teardown, and sticker-pack
-  bounds, malformed input, symlink rejection, GPS stripping and encrypted
-  persistence across restart. Animated imports are explicitly rejected.
-- **1 lifecycle UI test passed.** It used real app/chat password fields,
-  background/return and terminate/relaunch, without an authentication bypass.
-  It also checked the compact composer. The known system password-save sheet
-  was declined; no app privacy protections were disabled.
-- **22 relay tests passed in macOS CI and on the live host's isolated test
-  fixtures.** Coverage includes admission/device-approval races, revocation,
-  session termination, ciphertext recipient authorization and TURN credentials.
-- [iPhone IPA artifact](https://github.com/deplane-hash/fuckin-locked/actions/runs/40199838055/artifacts/12602032741).
-  It is unsigned and requires valid signing before installation.
-- [Appetize simulator artifact](https://github.com/deplane-hash/fuckin-locked/actions/runs/40199838055/artifacts/12602047167).
-  Extract GitHub's outer ZIP and upload the inner simulator `.app.zip`.
+The final media-owner hardening at `0db49c65beda5ff00084f6fea96644fb4ac5b5eb`
+is being checked by [run 40425352480](https://github.com/deplane-hash/fuckin-locked/actions/runs/40425352480).
+Use its artifacts only after it completes successfully. The iPhone artifact is
+unsigned and requires legitimate signing before installation. For Appetize,
+extract the outer GitHub artifact ZIP and upload the inner simulator `.app.zip`;
+a device IPA is not a simulator binary.
 
-## Live server checks
+## What the automated checks establish
 
-The authorized matching relay and coturn deployment are active. Service traffic
-uses the existing HTTPS gateway; media uses DNS-only `turn.freedomhub.at` with
-TLS/TCP 5349 and relay-only ICE. The unrelated FreedomHub site still returns 200.
+The real two-isolated-client HTTPS fixture uses libsignal for encrypted text,
+reactions, still/animated media and files, fingerprint approval, queued delivery
+and device revocation. Tests exercise real protocol keys rather than substituting
+a cosmetic lock. Local vault tests cover app/chat password protection of private
+protocol records, persistent delays on both gates, restart relocking, encrypted
+metadata/media, password rewrapping and interrupted atomic-write recovery.
 
-- Gateway health returned 200; TURN configuration without a session returned 401.
-- OpenSSL verified the public certificate chain and `turn.freedomhub.at` name
-  using TLS 1.3. The certificate expires 2027-01-23.
-- A coturn TLS client-to-client test on this host's public IP completed with
-  **200 messages sent, 198 received**. This confirms authenticated relay traffic,
-  not zero-loss delivery, off-host reachability or actual WebRTC audio.
-- Invalid credentials failed allocation. A plaintext TCP test did not complete
-  before its timeout. The official client separately requires TLS and rejects
-  alternate TURN hosts; no direct media fallback is configured.
-- The certificate deploy hook was exercised: protected cert/key copies were
-  refreshed, only coturn restarted, and TLS validation still passed. A real
-  future CA renewal and two-iPhone certificate rotation remain unverified.
-- Database mode is 0600 under a 0700 service directory; service UMask is 0077.
-  Root-only recovery files are in `/root/fuckin-locked-backup-20261025T120955Z`.
-  No deployment secret or device private key was committed to source.
+Native tests cover synchronous inactive shielding/invalidation, export edit-action
+and keyboard restrictions, bounded QR/pack/file parsing, GPS stripping, animation
+frame/timing bounds and encrypted preference/avatar persistence. Native audio and
+video tests validate no autoplay, memory range bounds, real AVFoundation loading
+through the private memory resource loader, no external playback and lock teardown.
+The video test writes only a synthetic public fixture to the test temporary
+directory; production playback does not write decrypted media files.
 
-## Limits and testing gates
+The lifecycle UI test enters actual passwords, backgrounds/returns, terminates/
+relaunches and checks both gates and the compact composer. It does not bypass
+authentication. Simulator checks do not prove physical snapshot/capture timing.
 
-This is the agreed **foreground testing** release. Background push, background
-ringing/calls, GIF integrations, general/video/animated attachments, QR pairing
-and broader profile/preferences work are unfinished. No inactive feature tabs
-are presented. Static pack importing is implemented; its system picker still
-needs hands-on device validation. Both phones must keep the same chat open and
-unlocked for incoming messages and calls.
+Relay tests cover single-use/expiry/raced admission and approval, authentication,
+session revocation, recipient-scoped ciphertext and activity, fixed-group roster
+authorization, prekey recovery, idempotent upload/delivery acknowledgement,
+encrypted profile/feature/push-token fields, bounded session retention and private
+APNs queue behavior. Push tests use mocks and generated fixture keys, not Apple
+production credentials. No test proves security against a compromised OS.
 
-Not verified: independently installed physical iPhones exchanging live messages
-or audio, Appetize execution itself, capture/snapshot timing on physical devices,
-real backup/restore and file-protection enforcement, broad VoiceOver/Dynamic Type
-coverage, or independent security review. Simulator tests cannot establish these.
-An initial microphone permission prompt can lock the app; unlock and retry.
+## Applied server checks
 
-Builds use Swift 5 language mode. The WebRTC callback handoff emits Swift 6
-sendability warnings for its Objective-C session-description type. No Swift 6
-migration or independent concurrency review is claimed. Dependency/toolchain
-warnings did not fail the tested Swift 5 build.
+The final tested relay source was installed on 2026-10-27 after creating and
+decrypt-verifying the root-only encrypted backup
+`/root/fuckin-locked-backup-20261027T002322Z/snapshot.tar.gz.fernet`.
+Only the messenger service restarted. Installed `service.py` and `push.py` match
+the tested working source. The first health request applies additive schema
+migrations; afterward SQLite integrity was `ok`, foreign-key errors were zero,
+and the device-feature table existed.
 
-See [installation and first-account setup](foreground-beta.md),
-[physical-device checks](device-checks.md), [threat model](threat-model.md), and
-[dependency/licensing notes](protocol-integration.md). Do not describe this as
-production-ready or every product feature as finished.
+The public gateway returned health 200 and unauthenticated features access 401.
+The existing FreedomHub homepage returned 200. Messenger and coturn were active.
+No APNs credentials are configured, so live background notices remain unavailable.
 
-## Historical reports (superseded by the sections above)
+Earlier TURN checks verified the public TLS chain/name, rejected invalid
+credentials, and transferred 200 sent/198 received packets on this host's public
+IP. They do not prove off-host reachability, zero loss or two-iPhone WebRTC audio.
+The TLS certificate expires 2027-01-23; the protected renewal hook was exercised.
+See [call deployment](calls-setup.md).
 
-### Earlier verified build
+## Remaining external checks and limits
 
-- [Run 40190714250](https://github.com/deplane-hash/fuckin-locked/actions/runs/40190714250)
-  passed at source revision `a95a30c5820a5d3f71f2370c82cef13e14bcacab`:
-  **30 core simulator tests, 1 lifecycle UI test, zero failures**. The unsigned
-  Release iPhone IPA also built and uploaded successfully. Signing was skipped.
-- The UI test exercised password setup, explicit local-draft creation, chat
-  password entry, compact composer sizing, Home/background return requiring
-  the app password, chat relocking, and termination/relaunch requiring the
-  app password. It declined only the known iOS password-saving sheet and
-  retried navigation when that sheet consumed a row tap. It used no vault
-  bypass or pre-authenticated test state.
-- Core cases include encrypted vault and password rewrapping, persistent
-  failure delays, libsignal two-client HTTPS delivery, abandoned-call outbox
-  rejection, call consent/identity/lock races, native privacy-cover events,
-  expired call commands, and pinned TURN-host rejection.
-- The separately executed Python server suite passed **22 tests**. The live
-  gateway health/auth checks returned 200 and 401 respectively; these do not
-  verify authenticated live messaging or call media.
-- [Unsigned IPA artifact](https://github.com/deplane-hash/fuckin-locked/actions/runs/40190714250/artifacts/12597951767).
-  GitHub wraps the IPA in an artifact ZIP. Device installation requires signing.
-- Not performed: live TURN/DNS deployment, two physical iPhone audio/message
-  checks, physical capture/snapshot timing, APNs setup, or independent security
-  review. `turn.freedomhub.at` is prepared in configuration but not provisioned.
-  Calls remain absent from bottom navigation. Push/background delivery and
-  animated/general attachment or pack importing are still unfinished.
+- Two separately signed physical iPhones: actual live messaging and audio calls,
+  camera/file-provider interactions, recording/mirroring, screenshot response,
+  app-switcher snapshots, VoiceOver and real backups/file-protection behavior.
+- Three separately installed clients: complete fixed-group exchange/roster-change
+  testing. Server group authorization tests do not substitute for this.
+- Apple APNs `.p8`, Key ID, Team ID/topic and an entitled provisioning profile,
+  then real notification/token rotation/revocation tests. See [push setup](push-setup.md).
+- Independent security review, parser/dependency maintenance, license obligations,
+  encrypted-volume verification and off-site backup/key custody.
 
-## Implemented corrections and earlier diagnostics
-
-- Run 40156246173 passed all 30 core simulator tests, including the native
-  privacy-cover notification regression and pinned TURN-host rejection cases.
-  Its lifecycle test passed chat unlock and the compact composer check, then
-  failed at app-password entry after backgrounding. The saved screen recording
-  shows an iOS "Save Password?" dialog blocking that field. Explicit password
-  AutoFill/save hints have now been removed from app password fields; the UI
-  test declines only that known system prompt if iOS heuristics still show it.
-  The later successful run above supersedes that failure. No claim is made that an app can
-  prevent a user from manually storing a password in another password manager.
-
-- Incoming calls now require explicit Accept before network/media construction.
-  Both directions check verified identity, unlocked chat, app activity, and an
-  operation generation across asynchronous setup. Every vault lock stops the
-  call synchronously, including screenshots, recording, and password changes.
-- Media failures disable the track, close the connection, clear candidate
-  buffers, and deactivate audio. Outbound signaling is serialized; SDP precedes
-  ICE. Call signaling no longer enters the durable message retry outbox and
-  carries an encrypted expiration. Legacy call history remains decodable but
-  cannot trigger calls.
-- Added coordinator tests for consent, rejection, identity changes, synchronous
-  locks, delayed completions, failed media setup, and matching hangups. Added an
-  HTTPS integration regression for abandoned offline calls and expiry tests.
-  These checks passed in the latest verified run above.
-- Corrected the UIKit composer's vertical sizing and duplicate local-draft
-  notice. Local drafts remain explicitly separate from recipient-bound chats.
-- Previous run 40149937507 built the unsigned device IPA and passed the
-  protocol/vault suite, but lifecycle verification timed out with an incomplete
-  result bundle. The lifecycle job now uses a fresh simulator and propagates
-  failures without continue-on-error. A timeout is never a pass.
-- Server suite rerun locally: 22 tests passed, including fresh expiring coturn
-  REST credentials, malformed TURN URLs, and credential confidentiality.
-  Prepared `deploy/coturn.conf.example` and `docs/calls-setup.md`; not deployed.
-  Physical iPhone call audio,
-  TURN deployment, capture/snapshot timing, and signing remain unverified.
-- Run 40152892461 passed all 28 protocol/vault/coordinator tests. Its UI
-  activity log showed chat-password and Unlock taps with hit point {-1,-1}
-  while the keyboard covered the non-scrollable password form. PasswordLayout
-  now scrolls within the keyboard-safe area. Initial privacy-cover attachment
-  no longer publishes vault changes inside a SwiftUI render; actual inactive
-  notifications still cover and lock synchronously. The latest workflow above
-  validates the corrected simulator UI path.
-
-## Current milestone status (supersedes historical notes below)
-
-- The voice-call transport is now implemented in source: authenticated call
-  signaling is carried as libsignal ciphertext, WebRTC is configured with
-  relay-only ICE and a separately pinned `turns:` hostname on the same server, and calls stop on inactive
-  transitions. The server advertises `encrypted_calls_v1` only with a complete
-  TURN-over-TLS configuration and never exposes the route without an active
-  session. Calls remain omitted from bottom navigation.
-- Server suite currently passes **22 tests**, including authenticated TURN
-  capability gating, invalid/absent TURN configuration, opaque envelope
-  storage, revocation, and invitation races.
-- Xcode run `40144712171` compiled the WebRTC/libsignal integration and passed
-  the full protocol/vault simulator suite, including the call-signal ciphertext
-  assertion. Its lifecycle UI test failed only on the local-draft status lookup;
-  run `40145403938` reruns that test using the explicit accessibility identifier.
-- A physical two-iPhone test is still required for microphone permission,
-  TURN certificate/credential rotation, DTLS-SRTP audio, background teardown,
-  capture behavior, and call interruption. The call path is not production-ready
-  or independently reviewed.
-
-- The local relay suite now has **18 passing tests**, including actual HTTP route
-  dispatch/auth, stable ciphertext upload IDs/conflict detection, sender-only
-  delivery status, expiring device approval and recoverable requester-scoped
-  prekey claims. No production database or live accounts are used by these tests.
-- Expanded Xcode runs `40129471328` and `40130411164` compiled the app but failed
-  the explicitly enabled relay integration test with a connection error. This
-  corrects the earlier assumption that a successful build proved that integration
-  test ran: setting a shell variable alone did not establish test-runner activation.
-- The CI-only scheme now passes the fixture enable flag directly to the test
-  runner. Results are preserved as an `.xcresult` and include failure summaries.
-- Run `40131001883` found a new compose-view catch-variable compile error; that
-  error is fixed in the working source. The newest rerun must be checked before
-  calling this source a buildable or verified beta.
-- Run `40131445830` compiled and ran **19 simulator tests: 18 passed, 1 failed,
-  0 skipped**. The passing cases include the real UI background/relaunch test,
-  vault/password-failure/atomic-write tests, and the libsignal store round trip.
-  The HTTPS fixture health request succeeds; integration stops at the first
-  device's Keychain identity creation before a bootstrap POST reaches the server.
-  The next revision uses ad-hoc simulator signing with explicit simulator-only
-  Keychain entitlements and reports safe OSStatus codes. Device builds do not use
-  the simulator entitlement file. This correction still requires a successful run.
-- Run `40132216165` validates that correction: **the two-client HTTPS/libsignal
-  integration test passed**, including invitation → approval → device binding →
-  both password gates → text/reaction/image delivery → offline queue reopening →
-  additional-device approval → session revocation and no silent forwarding.
-  All 18 non-UI cases passed; the one lifecycle UI case failed an assertion in
-  that run. Earlier unsigned simulator run `40131445830` passed that UI case.
-  The test is now isolated, time bounded and given descriptive assertion messages;
-  its exact prior source location is being extracted before a beta is verified.
-- A restricted native composer and third-party keyboard policy have been added
-  to close default Copy/Cut/drag/Writing Tools paths. Their new tests require the
-  next Xcode run. Public pairing keys remain selectable by design.
-- Added source/tests: persisted encrypted outbox; distinct Sent/Delivered states;
-  images/reactions; original stickers and encrypted preferences; explicit device
-  linking; synchronous native inactive cover; scene-local capture observation;
-  generation checks rejecting stale async completions; password-wrapper failure
-  recovery; and real simulator background/relaunch UI coverage. New tests are not
-  reported as passed until the matching Xcode run succeeds.
-- No new source in this milestone has been installed on physical iPhones. Live
-  two-device E2E, screenshots/recording/mirroring, snapshot timing, backup behavior
-  and full accessibility checks remain unverified. See `device-checks.md`.
-- Source changes are not automatically deployed to the live relay. The new client
-  requires matching authenticated relay capabilities and fails closed on an older
-  service. The prior signing failure requires valid matching repository secrets.
-
-The following sections record earlier results and limitations for traceability;
-their old feature counts and pending-work descriptions are historical.
-
-## Executed in this environment
-
-- `python3 -m py_compile server/service.py`: passed.
-- `python3 -m unittest -q` in `server/`: 14 tests passed. Coverage includes single-use and expired invitations, concurrent invitation and approval single-winner behavior, pending-device approval, one-time Ed25519 challenge, bootstrap exclusivity, encrypted member names, authenticated room listing, recipient-scoped ciphertext envelopes, one-time prekey retrieval and consumption preservation, revocation blocking sessions and new envelopes, and delivery acknowledgment authorization.
-- `python3 -m py_compile service.py`: passed after relay changes.
-- The host deployment virtual environment installed the pinned `cryptography==50.0.2`; the relay starts under systemd as `fuckinlocked` and listens only on `127.0.0.1:8787`.
-- Through the live `freedomhub.at` HTTPS route, `/fuckin-locked/health` returned 200 and an unauthenticated `/fuckin-locked/v1/people` request returned 401. The existing FreedomHub homepage still returned 200 after the isolated route was added.
-- Source scan for accidental app network endpoints, pasteboard, sharing, drag-and-drop, context menus, and arbitrary-load ATS setting. The source has one `URLSession` client, configured for HTTPS only, with redirects refused. No export APIs were found.
-
-## Not executed on this Linux workspace
-
-- `ios/FuckinLockedTests/LocalVaultTests.swift` covers relocking, app and chat attempt delays across vault reinitialization, and password rewrapping. `SignalProtocolTests.swift` exercises a persistent two-store libsignal prekey/whisper round trip. This host is Linux; local Xcode tools are unavailable, so these tests run in the macOS GitHub Actions workflow rather than here.
-- `ios/Podfile` pins LibSignalClient and its prebuilt FFI checksum. CocoaPods installation and compilation now run in GitHub Actions on Xcode 26; the current run is the verification authority for the latest source. This does not prove live gateway delivery or signed-device behavior.
-- GitHub Actions macOS 15 with Xcode 16.4 installed the pod, then failed compiling libsignal v0.105.0 because generated Swift source uses tuple trailing commas unsupported by that compiler. The workflow now targets macOS 26 and Xcode 26 for a rerun.
-- The first Xcode 26 run compiled libsignal, then found view-state `error` names shadowed by Swift's implicit catch value. These app source compile errors were fixed. The next run compiled the app but CocoaPods' framework embed script was blocked by Xcode user-script sandboxing; the project setting was changed to permit that script, and the simulator suite remains to be rerun.
-- iOS lifecycle transition timing, app-switcher snapshots, screenshot timing, capture state, VoiceOver, Dynamic Type, Reduce Motion, secure keyboard behavior, Keychain migration, and actual file protection attributes need testing on a signed device build.
-- The relay's pinned `cryptography==50.0.2` needs a clean-environment install test. The server tests here used preinstalled 41.0.7.
-- TLS validation and rotation still need a signed iOS device check. The live host route uses the existing CA-validated `freedomhub.at` certificate; the relay remains localhost-only and no direct fallback exists.
-
-## Remote macOS simulator verification
-
-- GitHub Actions run `40111100679` completed successfully on macOS 26.6 / Xcode 26.6. It generated the Xcode project, installed the pinned LibSignalClient CocoaPod, and ran `xcodebuild test` for the `FuckinLocked` scheme on an iPhone 17 simulator with code signing disabled.
-- That run compiled the app and executed the supplied vault tests plus `SignalProtocolTests`: the libsignal prekey/whisper round trip passed using two independently serialized stores. It also verifies the app/chat lock and persistent failed-attempt delay test code at simulator runtime.
-- The earlier Xcode 26 run `40110805303` failed only because `RelayPrekeyBundle` lacked `Encodable`; the fix is included in the successful run. Earlier Xcode 16.4/macOS 15 failures were toolchain incompatibilities with libsignal's generated Swift, not app protocol behavior.
-- The latest source at the time of this report also completed successfully in run `40112832355` on the same Xcode 26.6/iPhone 17 simulator workflow after the receive-after-fingerprint, delivery-state, and vault rewrap validation fixes.
-
-## Security claims not yet verified or implemented
-
-The one-to-one libsignal session path and persistent-store round trip are implemented and covered by the simulator test suite. The live gateway health/auth boundary is verified, but two independently provisioned iPhones still need to complete encrypted delivery through that route. Attachment transfer, generic push, call media, group key rotation, secure new-device pairing UI, capture/lifecycle device checks, backup behavior, accessibility review, and independent audit remain open. The relay tests establish opaque storage and authorization behavior; the Swift protocol test establishes client-side encryption/decryption but does not replace a live two-device test. No test here proves protection against a compromised OS, modified client, or malicious recipient.
+Background call continuation/ringing, presence, typing and read receipts are not
+provided. GIF search is local, not an external integration. Groups use fixed
+verified pairwise Signal fan-out, not an invented group cryptographic protocol.
+No content export is provided, but recipients can transcribe or photograph it.
+Screenshot notifications occur after capture; screenshots are not fully blocked.
+No guaranteed memory erasure, malicious-recipient or compromised-OS protection is
+claimed. See [physical-device checks](device-checks.md) before relying on the app.

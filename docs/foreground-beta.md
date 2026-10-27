@@ -1,4 +1,4 @@
-# Foreground beta 0.3.0
+# Beta 0.4.0 testing guide
 
 This is a testing release, not a production-security certification. Use test
 messages first. Simulator results do not replace two real iPhones.
@@ -7,8 +7,7 @@ messages first. Simulator results do not replace two real iPhones.
 
 Use the successful run for the latest source on
 [GitHub Actions](https://github.com/deplane-hash/fuckin-locked/actions).
-The verified 0.3.0 artifacts are [iPhone IPA](https://github.com/deplane-hash/fuckin-locked/actions/runs/40199838055/artifacts/12602032741)
-and [Appetize simulator](https://github.com/deplane-hash/fuckin-locked/actions/runs/40199838055/artifacts/12602047167).
+Use the 0.4.0 run and artifact links in [the current verification report](verification.md).
 
 - Real iPhones: download `fuckin-locked-unsigned-ipa`, extract the outer GitHub
   ZIP, sign its `.ipa` with a valid matching profile, then install.
@@ -40,7 +39,7 @@ must use an invitation and existing-member approval.
    Set different local chat passwords. Local drafts never deliver messages.
 3. Compare both device fingerprints through a trusted channel and approve them.
 4. Keep that chat open and unlocked on both phones. Exchange text, reactions,
-   images and starter/imported stickers. Sent means relay acceptance; Delivered
+   images, animated/imported stickers and small TXT/PDF/audio/video files. Sent means relay acceptance; Delivered
    means durable recipient storage, not a read receipt.
 5. Retry interrupted messages and restart the app. Queued messages should retain
    their identity and deliver once. Plaintext drafts are not delivery receipts.
@@ -56,10 +55,18 @@ must use an invitation and existing-member approval.
 9. Revoke the other device. New service access/messages must fail. Previously
    delivered data cannot be retracted. Re-enrollment must not restore history.
 
-Messages and incoming calls are fetched only while their chat is open and
-unlocked. No background push, CallKit ringing or background call continuation is
-included. Locking stops calls immediately. No Calls tab or unfinished GIF tab is
-shown. General files/video/animated-sticker import is not advertised.
+Messages and incoming call signaling are fetched only while their chat is open
+and unlocked. The Calls tab opens the required chat-password gate. Locking stops
+calls immediately; background ringing/continuation is not provided. Generic
+notification code is included but live delivery requires [Apple push setup](push-setup.md).
+The GIF drawer searches only local artwork. Attachments are bounded to 512 KB;
+use small public test clips first. Both clients must open this version before
+sending rich attachments; queued compatible ciphertext is retained during upgrades.
+
+Also test a fixed group with three approved devices, group fingerprint checks,
+and removal/revocation closing the old group. Test QR/manual invitation and device
+approval, encrypted avatar/preferences, pack credits, Reduce Motion and VoiceOver.
+Camera permission can lock the app; unlock and retry. No QR auto-approves a device.
 
 ## Server route and limits
 

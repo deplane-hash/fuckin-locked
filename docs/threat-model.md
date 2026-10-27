@@ -33,15 +33,11 @@ SwiftUI inactive cover; physical-device timing remains unverified. The system
 Photos picker may use iCloud connections outside the app gateway. There is no
 app-owned plaintext media cache. See `verification.md` for current pass/fail status.
 
-Historical limitations below that say attachment exchange or pairing UI are absent
-refer to the original foundation: still images and manual compared-key pairing
-are now implemented, while general/animated files, QR pairing, and push remain
-unfinished. Voice calls have a relay-only implementation but are not exposed in
-navigation until physical two-device verification. Each chat binds one remote
-device; adding a device never silently authorizes it in existing protocol sessions.
-
-Background push and independent review remain absent. Manual public-key device
-pairing with authenticated, expiring approval is implemented; QR scanning is not.
+The 0.4 implementation includes bounded animated GIFs, TXT/PDF/audio/video,
+QR/manual pairing and generic APNs source. Actual Apple push delivery remains
+unconfigured pending protected credentials and an entitled profile. QR codes are
+typed public pairing data, never automatic authorization or arbitrary URL opening.
+Independent review remains absent. Authenticated, expiring approval is mandatory.
 The prekey path generates a replacement after local consumption, but sustained
 exhaustion and larger multi-device pools still need review. Each chat binds one
 explicit remote device. New devices receive no historical keys. SwiftUI's
@@ -55,6 +51,38 @@ after the coordinated read. Schema/IDs/codecs/frame count/dimensions/bytes are
 checked before whole-pack vault commit; pixels are re-encoded without source
 EXIF/GPS. A lock-generation change rejects delayed picker results. Original files
 and file-provider caches remain outside the vault and are not retroactively
-encrypted or deleted. Animated packs are rejected. See `sticker-format.md`.
+encrypted or deleted. Schema-3 GIFs preserve bounded animation; schema 2 rejects
+animation. See `sticker-format.md`.
 
-Voice calls are implemented as a relay-only WebRTC audio path, but remain omitted from navigation pending physical two-device verification. The relay supplies only authenticated TURN-over-TLS configuration; WebRTC's DTLS-SRTP protects media and libsignal protects call signaling. A malicious TURN operator can still observe relay metadata and traffic timing, and a compromised endpoint or malicious recipient can record audio. TURN credentials must be short-lived and rotated by deployment operations. Calls fail closed when the gateway, capability gate, or TURN route is unavailable; there is no direct media fallback.
+Voice calls use a relay-only WebRTC audio path. The Calls destination opens the
+required chat-password gate; actual two-iPhone media still needs verification.
+The relay supplies only authenticated TURN-over-TLS configuration; WebRTC's
+DTLS-SRTP protects media and libsignal protects signaling. A malicious TURN
+operator observes relay metadata/timing, and recipients can record audio.
+Credentials are short-lived and rotated operationally. Gateway/capability/TURN
+failure closes calling with no direct media fallback. Locking ends media rather
+than continuing a background call. There is no background ringing implementation.
+
+Private file viewing is bounded untrusted parsing, not arbitrary file opening.
+PDF pages render to RAM images without scripts, links or QuickLook. Native video
+uses a private memory resource loader, forbids all external asset references,
+disables external playback and has no export/PiP/AirPlay controls. Audio/video
+never auto-play and clear on lock. Views additionally require their owning chat
+to remain unlocked. Framework/OS buffers cannot be guaranteed erased. Parser
+bugs and compromised OS behavior remain risks despite size/frame/duration bounds.
+
+The server sees accounts, device keys, room membership, delivery timing, sizes,
+IP addresses and call allocation metadata. Names/usernames, device feature claims
+and push tokens are field-encrypted with a separate server metadata key. That key
+cannot decrypt Signal payloads. Coalesced push notices contain only New message;
+Apple observes push metadata and system APNs traffic bypasses app routing.
+Rich-content feature claims are compatibility hints, never identity proof.
+Fixed group fan-out uses separately verified Signal pairs; roster removal closes
+the group and requires a fresh group for new keys. Larger groups and three-real-
+device behavior require further testing.
+
+Operational snapshots are authenticated encrypted archives; their root-only key
+is stored separately from backups. It is not a message decryption key. Backups
+were verified by decrypting in memory before old plaintext backup files were
+removed; no filesystem secure-erasure claim is made. Full-volume encryption and
+off-site key custody remain deployment assumptions requiring operator review.

@@ -9,8 +9,9 @@ issues five-minute TURN credentials. The public CA certificate expires
 hook copies protected certificate/key files and restarts only coturn.
 
 Configuration is root/service-readable. Database permissions are 0600 and the
-relay uses UMask 0077. Recovery files are in the root-only
-`/root/fuckin-locked-backup-20261025T120955Z`; never publish that backup.
+relay uses UMask 0077. Recovery snapshots are authenticated encrypted archives
+in timestamped root-only `/root/fuckin-locked-backup-*` directories; their protected
+key is stored separately. Never publish those backups or their key.
 
 TLS hostname/chain validation passed; the unauthenticated TURN API returned 401.
 An authenticated TLS client-to-client test transferred traffic on this host's
