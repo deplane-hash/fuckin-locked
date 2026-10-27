@@ -61,8 +61,8 @@ final class PrivateMediaBuffer: NSObject, AVAssetResourceLoaderDelegate, @unchec
     private var audioSessionActive = false
 
     init(file: PrivateAttachment, vault: LocalVault) throws {
-        try file.validate()
         guard let chatID = vault.unlockedChatID, vault.isUnlocked else { throw MessagingError.unavailable }
+        try file.validate()
         self.vault = vault; self.chatID = chatID; self.generation = vault.chatGeneration
         if file.format == .audio {
             audio = try AVAudioPlayer(data: file.data)

@@ -691,7 +691,7 @@ private struct ConversationView: View {
                             VStack(alignment: message.isOutgoing ? .trailing : .leading, spacing: 3) {
                                 if let bytes = message.image {
                                     Button { viewedImage = bytes } label: {
-                                        PrivateMediaImage(data: bytes).frame(width: 220, height: 220)
+                                        PrivateMediaImage(data: bytes, chatID: id).frame(width: 220, height: 220)
                                             .clipShape(RoundedRectangle(cornerRadius: 16))
                                     }.accessibilityLabel("View image")
                                 }
@@ -798,7 +798,7 @@ private struct ConversationView: View {
                 VStack {
                     Button("Close image") { self.viewedImage = nil }.padding()
                     Spacer()
-                    PrivateMediaImage(data: viewedImage).accessibilityLabel("Message image")
+                    PrivateMediaImage(data: viewedImage, chatID: id).accessibilityLabel("Message image")
                     Spacer()
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Palette.background).ignoresSafeArea(edges: .bottom)
@@ -809,7 +809,7 @@ private struct ConversationView: View {
             Button("File or short media clip") { fileGeneration = vault.chatGeneration; filePicker = true }
         }
         .photosPicker(isPresented: $photoPicker, selection: $selectedPhoto, matching: .images, preferredItemEncoding: .current)
-        .sheet(item: $viewedFile) { file in PrivateAttachmentView(attachment: file) { viewedFile = nil } }
+        .sheet(item: $viewedFile) { file in PrivateAttachmentView(attachment: file, chatID: id) { viewedFile = nil } }
         .sheet(isPresented: $filePicker) {
             StickerPackPicker(allowedTypes: [.pdf, .plainText, .wav, .mpeg4Audio, .mp3, .mpeg4Movie, .quickTimeMovie]) { result in
                 filePicker = false
@@ -1037,7 +1037,7 @@ struct StickerDrawer: View {
                                     library.recentStickers.insert(sticker.id, at: 0)
                                 } label: {
                                     if let bytes = try? sticker.imageData() {
-                                        PrivateMediaImage(data: bytes).frame(width: 80, height: 80)
+                                        PrivateMediaImage(data: bytes, chatID: id).frame(width: 80, height: 80)
                                     }
                                 }.disabled(messaging.working).accessibilityLabel("Send \(sticker.title) sticker")
                                 Button {

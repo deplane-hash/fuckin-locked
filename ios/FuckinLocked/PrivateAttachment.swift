@@ -72,7 +72,15 @@ struct PrivateAttachment: Codable, Equatable, Identifiable, Sendable {
 
 struct PrivateAttachmentView: View {
     let attachment: PrivateAttachment
+    let chatID: UUID
     let close: () -> Void
+    @EnvironmentObject private var vault: LocalVault
+    var body: some View {
+        Group {
+            if vault.isUnlocked && vault.unlockedChatID == chatID { unlockedContent }
+            else { Palette.background.ignoresSafeArea() }
+        }
+    }
     private func pageImage(_ index: Int) -> UIImage? {
         guard let document = PDFDocument(data: attachment.data), let page = document.page(at: index) else { return nil }
         let bounds = page.bounds(for: .mediaBox)
@@ -86,7 +94,7 @@ struct PrivateAttachmentView: View {
             page.draw(with: .mediaBox, to: context.cgContext)
         }
     }
-    var body: some View {
+    private var unlockedContent: some View {
         VStack {
             HStack { Text(attachment.name).font(.headline); Spacer(); Button("Close file", action: close) }.padding()
             ScrollView {

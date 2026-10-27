@@ -152,7 +152,7 @@ struct GroupConversationView: View {
                         }.padding().background(Palette.surface, in: RoundedRectangle(cornerRadius: 16))
                     }
                     ForEach(group.messages) { item in
-                        GroupBubble(item: item, sender: group.members.first(where: { $0.id == item.senderDevice })?.name ?? "Member",
+                        GroupBubble(chatID: id, item: item, sender: group.members.first(where: { $0.id == item.senderDevice })?.name ?? "Member",
                             ready: group.ready && !group.working,
                             viewImage: { viewedImage = $0 }, viewFile: { viewedFile = $0 }, react: { reaction in
                                 Task {
@@ -218,13 +218,13 @@ struct GroupConversationView: View {
                     VStack {
                         Button("Close image") { self.viewedImage = nil }.padding()
                         Spacer()
-                        PrivateMediaImage(data: viewedImage).accessibilityLabel("Group message image")
+                        PrivateMediaImage(data: viewedImage, chatID: id).accessibilityLabel("Group message image")
                         Spacer()
                     }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Palette.background)
                 }
             }
             .sheet(isPresented: $changePassword) { ChangeChatPasswordView(id: id) }
-            .sheet(item: $viewedFile) { file in PrivateAttachmentView(attachment: file) { viewedFile = nil } }
+            .sheet(item: $viewedFile) { file in PrivateAttachmentView(attachment: file, chatID: id) { viewedFile = nil } }
             .sheet(isPresented: $filePicker) {
                 StickerPackPicker(allowedTypes: [.pdf, .plainText, .wav, .mpeg4Audio, .mp3, .mpeg4Movie, .quickTimeMovie]) { result in
                     filePicker = false
@@ -287,6 +287,7 @@ struct GroupConversationView: View {
 
 private struct GroupBubble: View {
     @EnvironmentObject private var vault: LocalVault
+    let chatID: UUID
     let item: GroupDisplayedMessage
     let sender: String
     let ready: Bool
@@ -300,7 +301,7 @@ private struct GroupBubble: View {
                 if !item.message.isOutgoing { Text(sender).font(.caption).foregroundStyle(Palette.muted) }
                 if let bytes = item.message.image {
                     Button { viewImage(bytes) } label: {
-                        PrivateMediaImage(data: bytes).frame(width: 220, height: 220)
+                        PrivateMediaImage(data: bytes, chatID: chatID).frame(width: 220, height: 220)
                     }.accessibilityLabel("View image")
                 }
                 if let file = item.message.file {

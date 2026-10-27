@@ -71,6 +71,7 @@ extension PrivateImage {
 // application-owned plaintext file. Reduce Motion displays the first frame.
 struct PrivateMediaImage: UIViewRepresentable {
     let data: Data
+    let chatID: UUID
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var vault: LocalVault
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -80,6 +81,11 @@ struct PrivateMediaImage: UIViewRepresentable {
         return image
     }
     func updateUIView(_ view: UIImageView, context: Context) {
+        guard vault.isUnlocked, vault.unlockedChatID == chatID else {
+            view.stopAnimating(); view.animationImages = nil; view.image = nil
+            context.coordinator.data = nil
+            return
+        }
         let paused = reduceMotion || vault.preferences.reduceAnimations
         guard context.coordinator.data != data || context.coordinator.paused != paused else { return }
         context.coordinator.data = data; context.coordinator.paused = paused
