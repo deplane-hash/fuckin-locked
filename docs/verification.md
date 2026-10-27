@@ -14,8 +14,14 @@ at `cffeb2ba0a98804f17528c0c2d0e21653000f51d` passed with Xcode 26.6:
   isolated fixtures on 2026-10-27.
 
 The final media-owner hardening at `0db49c65beda5ff00084f6fea96644fb4ac5b5eb`
-is being checked by [run 40425352480](https://github.com/deplane-hash/fuckin-locked/actions/runs/40425352480).
-Use its artifacts only after it completes successfully. The iPhone artifact is
+passed all 47 core tests in [run 40425352480](https://github.com/deplane-hash/fuckin-locked/actions/runs/40425352480),
+but its lifecycle test exceeded the four-minute test-runner allowance. The
+diagnostic activity log reached final relaunch checks without a failed lock
+assertion. This is a failed verification run, not a lifecycle pass.
+`ce249a625dc339fe15907623425a06529fd7ac94` increases only bounded test-runner
+allowances, retaining all assertions and production password delays.
+[Run 40428125711](https://github.com/deplane-hash/fuckin-locked/actions/runs/40428125711)
+is checking that revision. Use its artifacts only after it succeeds. The iPhone artifact is
 unsigned and requires legitimate signing before installation. For Appetize,
 extract the outer GitHub artifact ZIP and upload the inner simulator `.app.zip`;
 a device IPA is not a simulator binary.
