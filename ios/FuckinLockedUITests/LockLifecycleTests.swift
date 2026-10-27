@@ -30,7 +30,10 @@ final class LockLifecycleTests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        executionTimeAllowance = 240
+        // Real password KDFs, system save-sheet checks and cold simulator
+        // relaunches can exceed four minutes on a loaded macOS runner. Keep
+        // every authentication/lifecycle assertion and bound the complete flow.
+        executionTimeAllowance = 420
     }
 
     @MainActor

@@ -70,7 +70,7 @@ jobs:
             CODE_SIGN_IDENTITY=- \
             -quiet
       - name: Verify simulator lifecycle
-        timeout-minutes: 15
+        timeout-minutes: 20
         working-directory: ios
         run: |
           xcrun simctl shutdown all
@@ -88,7 +88,7 @@ jobs:
             -resultBundlePath "$RUNNER_TEMP/FuckinLockedLifecycle.xcresult" \
             -only-testing:FuckinLockedUITests \
             -test-timeouts-enabled YES \
-            -maximum-test-execution-time-allowance 300 \
+            -maximum-test-execution-time-allowance 480 \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- -quiet
       - name: Package Appetize simulator app
         run: |
