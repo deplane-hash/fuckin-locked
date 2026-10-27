@@ -5,8 +5,8 @@ results are retained in [the 0.3 report](verification-history-0.3.md).
 
 ## Source and Xcode checks
 
-The completed [run 40422660333](https://github.com/deplane-hash/fuckin-locked/actions/runs/40422660333)
-at `cffeb2ba0a98804f17528c0c2d0e21653000f51d` passed with Xcode 26.6:
+The final [run 40428125711](https://github.com/deplane-hash/fuckin-locked/actions/runs/40428125711)
+at `ce249a625dc339fe15907623425a06529fd7ac94` completed successfully with Xcode 26.6:
 
 - 47 core simulator tests, zero failures.
 - 1 lifecycle UI test, zero failures.
@@ -20,11 +20,29 @@ diagnostic activity log reached final relaunch checks without a failed lock
 assertion. This is a failed verification run, not a lifecycle pass.
 `ce249a625dc339fe15907623425a06529fd7ac94` increases only bounded test-runner
 allowances, retaining all assertions and production password delays.
-[Run 40428125711](https://github.com/deplane-hash/fuckin-locked/actions/runs/40428125711)
-is checking that revision. Use its artifacts only after it succeeds. The iPhone artifact is
+The rerun passed all 47 core tests and the lifecycle UI test with zero failures.
+The iPhone artifact is
 unsigned and requires legitimate signing before installation. For Appetize,
 extract the outer GitHub artifact ZIP and upload the inner simulator `.app.zip`;
 a device IPA is not a simulator binary.
+
+Verified downloads:
+
+- [Unsigned iPhone IPA](https://github.com/deplane-hash/fuckin-locked/actions/runs/40428125711/artifacts/12701377293), version 0.4.0 build 74.
+- [Appetize simulator app](https://github.com/deplane-hash/fuckin-locked/actions/runs/40428125711/artifacts/12701044077), version 0.4.0 build 1.
+
+Both outer downloads matched GitHub's SHA-256 digests. Outer/inner ZIP integrity
+passed; executable headers are arm64 and Mach-O platform 2 (iPhone) or 7
+(Simulator), respectively. Execution on Appetize itself remains untested.
+GitHub supplies an outer ZIP; extract the IPA or simulator app ZIP inside it.
+Copies are available on the server under `/root/fuckin-locked/build/beta-0.4.0/`.
+
+Inner-file SHA-256:
+
+```text
+fbc53ae08a6fa4e73163d735d2831b2bde17d0caa6961aa4eabf9b63e6c2633e  FuckinLocked-0.4.0-unsigned.ipa
+f19240171710d98c10b5b4eb53173ad2a197b11621d2b055a190335d14e0d316  FuckinLocked-0.4.0-simulator.app.zip
+```
 
 ## What the automated checks establish
 
@@ -65,7 +83,8 @@ migrations; afterward SQLite integrity was `ok`, foreign-key errors were zero,
 and the device-feature table existed.
 
 The public gateway returned health 200 and unauthenticated features access 401.
-The existing FreedomHub homepage returned 200. Messenger and coturn were active.
+The existing FreedomHub homepage returned 200 with FreedomHub content rather
+than a default nginx page. Messenger and coturn were active.
 No APNs credentials are configured, so live background notices remain unavailable.
 
 Earlier TURN checks verified the public TLS chain/name, rejected invalid
